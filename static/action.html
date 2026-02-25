@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Populate fields (AI)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { font-family: system-ui, Arial; padding: 24px; }
+      button { padding: 10px 14px; font-size: 16px; cursor: pointer; }
+      pre { background: #f4f4f4; padding: 12px; border-radius: 8px; overflow: auto; }
+      .row { margin: 10px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Populate fields (AI)</h1>
+
+    <div class="row">
+      <strong>Context from Pipedrive URL:</strong>
+      <pre id="ctx">Loading…</pre>
+    </div>
+
+    <div class="row">
+      <button id="run">Run (demo)</button>
+    </div>
+
+    <pre id="out">Ready.</pre>
+
+    <script>
+      const params = Object.fromEntries(new URLSearchParams(location.search));
+      document.getElementById("ctx").textContent = JSON.stringify(params, null, 2);
+
+      document.getElementById("run").addEventListener("click", async () => {
+        document.getElementById("out").textContent = "Next step: call backend to fetch deal and update fields.";
+      });
+    </script>
+  </body>
+</html>

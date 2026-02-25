@@ -12,6 +12,11 @@ REDIRECT_URI = f"{BASE_URL}/oauth/callback"
 
 # ---- API routes first ----
 
+
+@app.get("/action")
+def action_page():
+    return FileResponse("static/action.html")
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
