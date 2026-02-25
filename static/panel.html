@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>DataFielder Panel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- App Extensions SDK via CDN (no bundler needed) -->
+    <script src="https://cdn.jsdelivr.net/npm/@pipedrive/app-extensions-sdk@0/dist/index.umd.js"></script>
+
+    <style>
+      body { font-family: system-ui, Arial; padding: 12px; }
+      button { padding: 8px 10px; cursor: pointer; }
+      pre { background: #f4f4f4; padding: 10px; border-radius: 8px; overflow: auto; }
+    </style>
+  </head>
+
+  <body>
+    <h3>DataFielder</h3>
+    <p>This is inside Pipedrive (panel iframe).</p>
+
+    <button id="btn">Show context</button>
+    <pre id="out">Waiting…</pre>
+
+    <script>
+      (async () => {
+        // Initialize SDK (required for custom UI extensions)
+        const sdk = await new AppExtensionsSDK().initialize();
+
+        document.getElementById("btn").addEventListener("click", async () => {
+          // At minimum, you can read the URL params (deal id etc.)
+          const params = Object.fromEntries(new URLSearchParams(location.search));
+          document.getElementById("out").textContent = JSON.stringify(params, null, 2);
+        });
+
+        // Optional: ask Pipedrive to resize the iframe to fit content
+        // (You can fine-tune later)
+        try {
+          await sdk.execute("resize", { height: 420 });
+        } catch (e) {}
+      })();
+    </script>
+  </body>
+</html>
