@@ -664,6 +664,10 @@ async def api_populate(payload: dict):
     record_id  = str(payload.get("id"))
     company_id = str(payload.get("companyId"))
 
+    # Normalise both spellings Pipedrive may send
+    if resource in ("organisation", "organization"):
+        resource = "organization"
+
     if resource not in ("deal", "person", "organization"):
         return JSONResponse({"error": "Unsupported resource"}, status_code=400)
 
@@ -709,7 +713,13 @@ async def api_populate(payload: dict):
 
         has_history = bool(notes or activities)
         source_note = " (based on notes & activity history)" if has_history else " (no history found — used deal details only)"
-        return {"ok": True, "message": f"Done. Deal context populated{source_note}."}
+        return {
+            "ok":           True,
+            "message":      f"Done. Deal context populated{source_note}.",
+            "filled_website": ["Deal Context"],
+            "filled_web":     [],
+            "not_found":      [],
+        }
 
     # ── Organisation ─────────────────────────────────────────────────────────
     r = requests.get(f"{base}/organizations/{record_id}", headers=headers, timeout=30)
