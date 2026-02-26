@@ -11,6 +11,7 @@ app = FastAPI()
 BASE_URL = os.getenv("BASE_URL", "https://pipedrive-button.onrender.com")
 PIPEDRIVE_CLIENT_ID = os.getenv("PIPEDRIVE_CLIENT_ID", "")
 REDIRECT_URI = f"{BASE_URL}/oauth/callback"
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 FIELD_KEYS = {
     "deal": {"deal_context": "e637e09d69529de9a304c5a82a7a16eccee68c83"},          # put API key here
@@ -55,6 +56,97 @@ def load_tokens(company_id: str):
     if not row:
         return None
     return {"access_token": row[0], "refresh_token": row[1], "expires_at": row[2]}
+
+def ai_write_summary(resource: str, record: dict) -> str:
+    """
+    Returns a short summary string for:
+      - person -> 'Background'
+      - organization -> 'About'
+      - deal -> 'Deal Context'
+    """
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("Missing OPENAI_API_KEY env var")
+
+    # Build the prompt from what we already have in Pipedrive
+    # (Later we can enrich it with website text / web search)
+    if resource == "person":
+        name = record.get("name")
+        emails = record.get("email")
+        phones = record.get("phone")
+        org = (record.get("org_id") or {}).get("name") if isinstance(record.get("org_id"), dict) else record.get("org_id")
+
+        # Try to find a LinkedIn URL if it exists in the record (custom field or standard field)
+        linkedin_url = None
+        for k, v in record.items():
+            if "linkedin" in str(k).lower() and isinstance(v, str) and v.startswith("http"):
+                linkedin_url = v
+                break
+
+        user_text = f"""
+Create a short professional background (3-6 sentences) for a CRM contact.
+
+Person name: {name}
+Org: {org}
+Emails: {emails}
+Phones: {phones}
+LinkedIn URL (reference only; do not claim you read it unless content is provided): {linkedin_url}
+
+Rules:
+- If info is missing, be conservative and do not invent facts.
+- Keep it concise and useful for sales.
+- Output plain text only.
+""".strip()
+
+    elif resource == "organization":
+        name = record.get("name")
+        website = record.get("website") or record.get("websites")  # sometimes varies
+        address = record.get("address")
+
+        user_text = f"""
+Write a short "About" paragraph (3-6 sentences) for a CRM organization.
+
+Company name: {name}
+Website: {website}
+Address: {address}
+
+Rules:
+- If you cannot access the website content, do not invent specifics.
+- Keep it concise, business-focused, no hype.
+- Output plain text only.
+""".strip()
+
+    else:  # deal
+        title = record.get("title")
+        value = record.get("value")
+        currency = record.get("currency")
+        stage = record.get("stage_id")
+        org = (record.get("org_id") or {}).get("name") if isinstance(record.get("org_id"), dict) else record.get("org_id")
+        person = (record.get("person_id") or {}).get("name") if isinstance(record.get("person_id"), dict) else record.get("person_id")
+
+        user_text = f"""
+Write a short deal context note (3-6 sentences) for a CRM deal.
+
+Deal title: {title}
+Value: {value} {currency}
+Stage: {stage}
+Organization: {org}
+Primary person: {person}
+
+Rules:
+- Do not invent facts beyond what is provided.
+- Make it useful as context for the next call/email.
+- Output plain text only.
+""".strip()
+
+    # Call OpenAI Responses API
+    resp = openai_client.responses.create(
+        model="gpt-4.1-mini",
+        input=[
+            {"role": "system", "content": "You are an assistant that writes concise, factual CRM summaries."},
+            {"role": "user", "content": user_text},
+        ],
+    )
+    return resp.output_text.strip()
 
 # ---------------------------
 # Panel (embedded in Pipedrive)
@@ -187,8 +279,12 @@ async def api_populate(payload: dict):
     if current_value not in (None, "", []):
         return {"ok": True, "message": "Field already filled. Nothing to do."}
 
-    dummy_value = "Filled by DataFielder (test)"
-    update = {field_key: dummy_value}
+    try:
+        ai_text = ai_write_summary(resource, data)
+    except Exception as e:
+        return JSONResponse({"error": "AI generation failed", "details": str(e)}, status_code=500)
+
+    update = {field_key: ai_text}
 
     u = requests.put(put_url, json=update, headers={"Authorization": f"Bearer {access_token}"}, timeout=30)
     if u.status_code != 200:
