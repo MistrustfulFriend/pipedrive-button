@@ -864,4 +864,160 @@ async def api_populate(payload: dict):
     }
 
 
+@app.post("/api/chat")
+async def api_chat(payload: dict):
+    """
+    Lightweight chat proxy. Receives:
+      - messages: list of {role, content} (full history)
+      - context:  optional deal/org context string prepended as system context
+      - companyId: for auth check
+    Returns: {reply: str}
+    """
+    company_id = str(payload.get("companyId", ""))
+    messages   = payload.get("messages", [])
+    context    = payload.get("context", "").strip()
+
+    if not messages:
+        return JSONResponse({"error": "No messages provided"}, status_code=400)
+
+    # Optional: verify company has a valid token (soft check, don't block chat)
+    tokens = load_tokens(company_id) if company_id else None
+
+    system_content = (
+        "You are a helpful sales assistant embedded inside Pipedrive CRM. "
+        "You help sales reps understand their deals, draft emails, prepare for calls, "
+        "and answer questions about contacts and organisations. "
+        "Be concise and practical. Use plain text unless the user asks for formatting."
+    )
+    if context:
+        system_content += f"\n\n== CURRENT RECORD CONTEXT ==\n{context}"
+
+    try:
+        resp = openai_client.responses.create(
+            model="gpt-4.1-mini",
+            input=[
+                {"role": "system", "content": system_content},
+                *messages,
+            ],
+        )
+        return {"reply": resp.output_text.strip()}
+    except Exception as e:
+        return JSONResponse({"error": "AI request failed", "details": str(e)}, status_code=500)
+
+
+@app.post("/api/context")
+async def api_context(payload: dict):
+    """
+    Returns a plain-text context string for the current record.
+    Used by the chat to ground conversations in real CRM data.
+    """
+    resource   = payload.get("resource", "")
+    record_id  = str(payload.get("id", ""))
+    company_id = str(payload.get("companyId", ""))
+
+    if resource in ("organisation", "organization"):
+        resource = "organization"
+
+    tokens = load_tokens(company_id)
+    if not tokens:
+        return {"context": ""}
+
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    base    = "https://api.pipedrive.com/v1"
+    lines   = []
+
+    try:
+        if resource == "deal":
+            r = requests.get(f"{base}/deals/{record_id}", headers=headers, timeout=15)
+            if r.status_code == 200:
+                d = r.json().get("data", {})
+                lines.append(f"Record type: Deal")
+                if d.get("title"):       lines.append(f"Title: {d['title']}")
+                if d.get("value"):       lines.append(f"Value: {d['value']} {d.get('currency','')}")
+                if d.get("probability"): lines.append(f"Win probability: {d['probability']}%")
+                close = d.get("close_time") or d.get("expected_close_date")
+                if close: lines.append(f"Expected close: {str(close)[:10]}")
+                if d.get("status"):      lines.append(f"Status: {d['status']}")
+                stage = d.get("stage_id")
+                if isinstance(stage, dict): lines.append(f"Stage: {stage.get('name','')}")
+                org = d.get("org_id")
+                if isinstance(org, dict): lines.append(f"Organisation: {org.get('name','')}")
+                person = d.get("person_id")
+                if isinstance(person, dict): lines.append(f"Contact: {person.get('name','')}")
+                owner = d.get("owner_id")
+                if isinstance(owner, dict): lines.append(f"Owner: {owner.get('name','')}")
+                # Custom deal context field
+                ctx_key = DEAL_FIELDS["deal_context"]["key"]
+                if d.get(ctx_key): lines.append(f"\nDeal context:\n{d[ctx_key]}")
+                # Recent notes
+                notes = fetch_deal_notes(record_id, headers)
+                nb = format_notes_block(notes)
+                if nb: lines.append("\n" + nb)
+                # Recent activities
+                acts = fetch_deal_activities(record_id, headers)
+                ab = format_activities_block(acts)
+                if ab: lines.append("\n" + ab)
+
+        elif resource == "organization":
+            r = requests.get(f"{base}/organizations/{record_id}", headers=headers, timeout=15)
+            if r.status_code == 200:
+                d = r.json().get("data", {})
+                lines.append(f"Record type: Organisation")
+                if d.get("name"):    lines.append(f"Name: {d['name']}")
+                if d.get("address"): lines.append(f"Address: {d['address']}")
+                website = d.get("website") or ""
+                if isinstance(website, list): website = website[0].get("value","") if website else ""
+                if website: lines.append(f"Website: {website}")
+                # Custom fields
+                for fname, finfo in ORG_FIELDS.items():
+                    val = d.get(finfo["key"])
+                    if val and fname not in ("address",):
+                        if isinstance(val, list):
+                            val = ", ".join(v.get("value","") for v in val if isinstance(v,dict))
+                        if val: lines.append(f"{finfo['label']}: {val}")
+    except Exception:
+        pass
+
+    return {"context": "\n".join(lines)}
+
+
+@app.post("/api/chat")
+async def api_chat(payload: dict):
+    """
+    Chat proxy. Receives:
+      - messages:  [{role, content}]  full conversation history
+      - context:   optional CRM context string prepended as system context
+      - companyId: for logging/auth
+    Returns: {reply: str}
+    """
+    messages   = payload.get("messages", [])
+    context    = (payload.get("context") or "").strip()
+    company_id = str(payload.get("companyId", ""))
+
+    if not messages:
+        return JSONResponse({"error": "No messages provided"}, status_code=400)
+
+    system = (
+        "You are a helpful sales assistant embedded inside Pipedrive CRM. "
+        "You help sales reps understand their deals and organisations, draft emails, "
+        "prepare for calls, and answer questions. "
+        "Be concise and practical. Use plain text unless the user asks for formatting. "
+        "When drafting emails, write the full email including a subject line."
+    )
+    if context:
+        system += f"\n\n== CURRENT RECORD ==\n{context}"
+
+    try:
+        resp = openai_client.responses.create(
+            model="gpt-4.1-mini",
+            input=[
+                {"role": "system", "content": system},
+                *messages,
+            ],
+        )
+        return {"reply": resp.output_text.strip()}
+    except Exception as e:
+        return JSONResponse({"error": "AI request failed", "details": str(e)}, status_code=500)
+
+
 app.mount("/static", StaticFiles(directory="static"), name="static")

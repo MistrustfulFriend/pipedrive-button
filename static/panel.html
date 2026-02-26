@@ -11,350 +11,175 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <style>
       :root {
-        /* Pipedrive design tokens */
-        --pd-green:        #1db954;
-        --pd-green-dark:   #19a349;
-        --pd-green-alpha:  rgba(29,185,84,0.10);
-        --pd-navy:         #1a1f36;
-        --pd-text:         #1a1f36;
+        --pd-green:          #1db954;
+        --pd-green-dark:     #19a349;
+        --pd-green-alpha:    rgba(29,185,84,0.10);
+        --pd-navy:           #1a1f36;
+        --pd-text:           #1a1f36;
         --pd-text-secondary: #6b7280;
-        --pd-text-muted:   #9ca3af;
-        --pd-border:       #e5e7eb;
-        --pd-border-strong:#d1d5db;
-        --pd-bg:           #ffffff;
-        --pd-bg-subtle:    #f9fafb;
-        --pd-bg-hover:     #f3f4f6;
-        --pd-blue:         #2563eb;
-        --pd-blue-light:   #eff6ff;
-        --pd-blue-border:  #bfdbfe;
-        --pd-red:          #dc2626;
-        --pd-red-light:    #fef2f2;
-        --pd-red-border:   #fca5a5;
-        --pd-yellow:       #d97706;
-        --pd-yellow-light: #fffbeb;
-        --pd-yellow-border:#fcd34d;
-        --radius-sm:       4px;
-        --radius:          6px;
-        --radius-lg:       10px;
-        --shadow-sm:       0 1px 2px rgba(0,0,0,0.05);
-        --shadow:          0 1px 3px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.06);
-        --font:            'Inter', -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+        --pd-text-muted:     #9ca3af;
+        --pd-border:         #e5e7eb;
+        --pd-border-strong:  #d1d5db;
+        --pd-bg:             #ffffff;
+        --pd-bg-subtle:      #f9fafb;
+        --pd-bg-hover:       #f3f4f6;
+        --pd-blue:           #2563eb;
+        --pd-blue-light:     #eff6ff;
+        --pd-blue-border:    #bfdbfe;
+        --pd-red:            #dc2626;
+        --pd-red-light:      #fef2f2;
+        --pd-red-border:     #fca5a5;
+        --radius-sm:         4px;
+        --radius:            6px;
+        --radius-lg:         10px;
+        --shadow-sm:         0 1px 2px rgba(0,0,0,0.05);
+        --shadow:            0 1px 3px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.06);
+        --font:              'Inter', -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
       }
-
       * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: var(--font); font-size: 13px; color: var(--pd-text); background: var(--pd-bg); padding: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
-      body {
-        font-family: var(--font);
-        font-size: 13px;
-        color: var(--pd-text);
-        background: var(--pd-bg);
-        padding: 14px;
-        line-height: 1.5;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-      }
-
-      /* ── Header ─────────────────────────────────────────────── */
-      .header {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 14px;
-        padding-bottom: 14px;
-        border-bottom: 1px solid var(--pd-border);
-      }
-
-      .logo {
-        width: 32px; height: 32px;
-        flex-shrink: 0;
-        border-radius: var(--radius);
-        background: var(--pd-navy);
-        display: flex; align-items: center; justify-content: center;
-        box-shadow: var(--shadow);
-        overflow: hidden;
-      }
+      /* Header */
+      .header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--pd-border); }
+      .logo { width: 32px; height: 32px; flex-shrink: 0; border-radius: var(--radius); background: var(--pd-navy); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow); overflow: hidden; }
       .logo svg { width: 20px; height: 20px; }
-
       .header-text { flex: 1; min-width: 0; }
-      .header-text h1 {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--pd-text);
-        letter-spacing: -0.01em;
-        line-height: 1.3;
-      }
-      .header-text p {
-        font-size: 11px;
-        color: var(--pd-text-muted);
-        margin-top: 1px;
-        line-height: 1.3;
-      }
+      .header-text h1 { font-size: 13px; font-weight: 600; color: var(--pd-text); letter-spacing: -0.01em; line-height: 1.3; }
+      .header-text p { font-size: 11px; color: var(--pd-text-muted); margin-top: 1px; line-height: 1.3; }
+      .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--pd-green); box-shadow: 0 0 0 2px var(--pd-green-alpha); flex-shrink: 0; }
 
-      /* Status dot */
-      .status-dot {
-        width: 6px; height: 6px;
-        border-radius: 50%;
-        background: var(--pd-green);
-        box-shadow: 0 0 0 2px var(--pd-green-alpha);
-        flex-shrink: 0;
-        margin-top: 1px;
-      }
+      /* Tabs */
+      .tabs { display: flex; gap: 2px; margin-bottom: 14px; background: var(--pd-bg-subtle); border: 1px solid var(--pd-border); border-radius: var(--radius); padding: 3px; }
+      .tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 6px 10px; font-size: 12px; font-weight: 500; color: var(--pd-text-muted); border: none; background: none; border-radius: var(--radius-sm); cursor: pointer; font-family: var(--font); transition: background 0.12s, color 0.12s; line-height: 1; }
+      .tab svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+      .tab:hover:not(.tab-active) { background: var(--pd-bg-hover); color: var(--pd-text-secondary); }
+      .tab.tab-active { background: #fff; color: var(--pd-text); box-shadow: var(--shadow-sm); border: 1px solid var(--pd-border); }
 
-      /* ── Main button ─────────────────────────────────────────── */
-      .btn {
-        display: flex; align-items: center; justify-content: center; gap: 7px;
-        width: 100%; padding: 9px 16px;
-        border: none; border-radius: var(--radius);
-        font-family: var(--font); font-size: 13px; font-weight: 500;
-        cursor: pointer; line-height: 1;
-        transition: background 0.15s, box-shadow 0.15s, transform 0.1s, opacity 0.15s;
-        -webkit-font-smoothing: antialiased;
-        letter-spacing: -0.01em;
-      }
+      /* Tab panels */
+      .tab-panel { display: none; }
+      .tab-panel.active { display: block; }
 
-      .btn-primary {
-        background: var(--pd-green);
-        color: #fff;
-        box-shadow: 0 1px 2px rgba(29,185,84,0.25), 0 0 0 1px rgba(29,185,84,0.20) inset;
-      }
-      .btn-primary:hover:not(:disabled) {
-        background: var(--pd-green-dark);
-        box-shadow: 0 2px 6px rgba(29,185,84,0.30), 0 0 0 1px rgba(29,185,84,0.20) inset;
-      }
+      /* Buttons */
+      .btn { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; padding: 9px 16px; border: none; border-radius: var(--radius); font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; line-height: 1; transition: background 0.15s, box-shadow 0.15s, transform 0.1s, opacity 0.15s; -webkit-font-smoothing: antialiased; letter-spacing: -0.01em; }
+      .btn-primary { background: var(--pd-green); color: #fff; box-shadow: 0 1px 2px rgba(29,185,84,0.25), 0 0 0 1px rgba(29,185,84,0.20) inset; }
+      .btn-primary:hover:not(:disabled) { background: var(--pd-green-dark); }
       .btn-primary:active:not(:disabled) { transform: scale(0.985); }
       .btn:disabled { opacity: 0.50; cursor: not-allowed; }
+      .btn-icon { width: 15px; height: 15px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
-      .btn-icon {
-        width: 15px; height: 15px; flex-shrink: 0;
-        stroke: currentColor; fill: none;
-        stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
-      }
-
-      .spinner {
-        width: 14px; height: 14px; flex-shrink: 0;
-        border: 2px solid rgba(255,255,255,0.30);
-        border-top-color: #fff;
-        border-radius: 50%;
-        animation: spin 0.65s linear infinite;
-      }
+      .spinner { width: 14px; height: 14px; flex-shrink: 0; border: 2px solid rgba(255,255,255,0.30); border-top-color: #fff; border-radius: 50%; animation: spin 0.65s linear infinite; }
       @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes slideIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-      .btn-hint {
-        font-size: 11px;
-        color: var(--pd-text-muted);
-        margin-top: 7px;
-        text-align: center;
-        letter-spacing: 0;
-      }
+      .btn-hint { font-size: 11px; color: var(--pd-text-muted); margin-top: 7px; text-align: center; }
 
-      /* ── Result card ─────────────────────────────────────────── */
-      .result-card {
-        margin-top: 12px;
-        border-radius: var(--radius-lg);
-        border: 1px solid var(--pd-border);
-        overflow: hidden;
-        display: none;
-        animation: slideIn 0.2s ease;
-      }
-      @keyframes slideIn {
-        from { opacity: 0; transform: translateY(4px); }
-        to   { opacity: 1; transform: translateY(0); }
-      }
+      /* Result card */
+      .result-card { margin-top: 12px; border-radius: var(--radius-lg); border: 1px solid var(--pd-border); overflow: hidden; display: none; animation: slideIn 0.2s ease; }
       .result-card.visible { display: block; }
-
-      /* Card header bar */
-      .card-bar {
-        display: flex; align-items: center; gap: 8px;
-        padding: 10px 12px;
-        font-size: 12px; font-weight: 600;
-      }
-      .card-bar-icon {
-        width: 16px; height: 16px; flex-shrink: 0;
-        stroke: currentColor; fill: none;
-        stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
-      }
+      .card-bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 12px; font-weight: 600; }
+      .card-bar-icon { width: 16px; height: 16px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
       .card-bar-text { flex: 1; line-height: 1.3; }
-      .card-bar-count {
-        font-size: 11px; font-weight: 600;
-        padding: 1px 7px; border-radius: 20px;
-        letter-spacing: 0;
-      }
-
-      /* States */
+      .card-bar-count { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 20px; }
       .state-success .card-bar { background: #f0fdf4; color: #166534; border-bottom: 1px solid #bbf7d0; }
       .state-success .card-bar-count { background: #dcfce7; color: #166534; }
-      .state-success .card-body  { background: #fff; }
-
+      .state-success .card-body { background: #fff; }
       .state-warning .card-bar { background: #fffbeb; color: #92400e; border-bottom: 1px solid #fde68a; }
       .state-warning .card-bar-count { background: #fef3c7; color: #92400e; }
-      .state-warning .card-body  { background: #fff; }
-
+      .state-warning .card-body { background: #fff; }
       .state-error .card-bar { background: #fef2f2; color: #991b1b; border-bottom: 1px solid #fecaca; }
       .state-error .card-bar-count { background: #fee2e2; color: #991b1b; }
-      .state-error .card-body  { background: #fff; }
-
+      .state-error .card-body { background: #fff; }
       .card-body { padding: 10px 12px; }
-
-      /* Field groups */
       .field-group { margin-bottom: 9px; }
       .field-group:last-child { margin-bottom: 0; }
-
-      .group-label {
-        font-size: 10px; font-weight: 600;
-        text-transform: uppercase; letter-spacing: 0.06em;
-        color: var(--pd-text-muted);
-        margin-bottom: 5px;
-        display: flex; align-items: center; gap: 5px;
-      }
-      .group-label-dot {
-        width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0;
-      }
-
+      .group-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--pd-text-muted); margin-bottom: 5px; display: flex; align-items: center; gap: 5px; }
+      .group-label-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
       .chip-row { display: flex; flex-wrap: wrap; gap: 4px; }
+      .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px 3px 6px; border-radius: 20px; font-size: 11px; font-weight: 500; line-height: 1; border: 1px solid transparent; }
+      .chip svg { width: 10px; height: 10px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+      .chip-green { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+      .chip-blue  { background: #eff6ff; border-color: var(--pd-blue-border); color: #1e40af; }
+      .chip-grey  { background: var(--pd-bg-subtle); border-color: var(--pd-border); color: var(--pd-text-secondary); }
+      .divider { height: 1px; background: var(--pd-border); margin: 9px 0; }
 
-      .chip {
-        display: inline-flex; align-items: center; gap: 4px;
-        padding: 3px 8px 3px 6px;
-        border-radius: 20px;
-        font-size: 11px; font-weight: 500;
-        line-height: 1;
-        border: 1px solid transparent;
-      }
-      .chip svg {
-        width: 10px; height: 10px; flex-shrink: 0;
-        stroke: currentColor; fill: none;
-        stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round;
-      }
-
-      .chip-green {
-        background: #f0fdf4; border-color: #bbf7d0; color: #166534;
-      }
-      .chip-blue {
-        background: #eff6ff; border-color: var(--pd-blue-border); color: #1e40af;
-      }
-      .chip-grey {
-        background: var(--pd-bg-subtle); border-color: var(--pd-border); color: var(--pd-text-secondary);
-      }
-
-      .divider {
-        height: 1px;
-        background: var(--pd-border);
-        margin: 9px 0;
-      }
-
-
-      /* ── Date range (deal only) ──────────────────────────────── */
-      .date-range {
-        display: none;
-        margin-top: 12px;
-        padding: 11px 12px;
-        background: var(--pd-bg-subtle);
-        border: 1px solid var(--pd-border);
-        border-radius: var(--radius-lg);
-        animation: slideIn 0.18s ease;
-      }
+      /* Date range */
+      .date-range { display: none; margin-top: 12px; padding: 11px 12px; background: var(--pd-bg-subtle); border: 1px solid var(--pd-border); border-radius: var(--radius-lg); animation: slideIn 0.18s ease; }
       .date-range.visible { display: block; }
-
-      .date-range-title {
-        font-size: 11px;
-        font-weight: 600;
-        color: var(--pd-text-secondary);
-        letter-spacing: 0.02em;
-        margin-bottom: 8px;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-      }
-      .date-range-title svg {
-        width: 12px; height: 12px; flex-shrink: 0;
-        stroke: var(--pd-text-muted); fill: none;
-        stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
-        opacity: 0.7;
-      }
-
-      .date-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-      }
-
-      .date-field label {
-        display: block;
-        font-size: 10px;
-        font-weight: 500;
-        color: var(--pd-text-muted);
-        margin-bottom: 3px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-      .date-field input[type="date"] {
-        width: 100%;
-        padding: 6px 8px;
-        font-family: var(--font);
-        font-size: 12px;
-        color: var(--pd-text);
-        background: var(--pd-bg);
-        border: 1px solid var(--pd-border-strong);
-        border-radius: var(--radius);
-        outline: none;
-        transition: border-color 0.15s, box-shadow 0.15s;
-        -webkit-appearance: none;
-      }
-      .date-field input[type="date"]:focus {
-        border-color: var(--pd-green);
-        box-shadow: 0 0 0 2px var(--pd-green-alpha);
-      }
-
-      .date-hint {
-        font-size: 10px;
-        color: var(--pd-text-muted);
-        margin-top: 7px;
-        line-height: 1.4;
-      }
-      .date-clear {
-        background: none;
-        border: none;
-        font-family: var(--font);
-        font-size: 10px;
-        color: var(--pd-text-muted);
-        cursor: pointer;
-        padding: 0;
-        text-decoration: underline;
-        text-underline-offset: 2px;
-      }
+      .date-range-title { font-size: 11px; font-weight: 600; color: var(--pd-text-secondary); margin-bottom: 8px; display: flex; align-items: center; gap: 5px; }
+      .date-range-title svg { width: 12px; height: 12px; stroke: var(--pd-text-muted); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; flex-shrink: 0; }
+      .date-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .date-field label { display: block; font-size: 10px; font-weight: 500; color: var(--pd-text-muted); margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
+      .date-field input[type="date"] { width: 100%; padding: 6px 8px; font-family: var(--font); font-size: 12px; color: var(--pd-text); background: var(--pd-bg); border: 1px solid var(--pd-border-strong); border-radius: var(--radius); outline: none; transition: border-color 0.15s, box-shadow 0.15s; }
+      .date-field input[type="date"]:focus { border-color: var(--pd-green); box-shadow: 0 0 0 2px var(--pd-green-alpha); }
+      .date-hint { font-size: 10px; color: var(--pd-text-muted); margin-top: 7px; line-height: 1.4; }
+      .date-clear { background: none; border: none; font-family: var(--font); font-size: 10px; color: var(--pd-text-muted); cursor: pointer; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
       .date-clear:hover { color: var(--pd-text-secondary); }
-      /* ── Notice (person / info) ──────────────────────────────── */
-      .notice {
-        display: flex; align-items: flex-start; gap: 9px;
-        margin-top: 12px;
-        padding: 10px 12px;
-        background: var(--pd-bg-subtle);
-        border: 1px solid var(--pd-border);
-        border-radius: var(--radius-lg);
-        font-size: 12px;
-        color: var(--pd-text-secondary);
-        line-height: 1.5;
-      }
-      .notice-icon {
-        width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px;
-        stroke: var(--pd-text-muted); fill: none;
-        stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
-        opacity: 0.7;
-      }
+
+      /* ── Chat ── */
+      .chat-wrap { display: flex; flex-direction: column; gap: 10px; }
+
+      .prompt-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+      .prompt-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; font-family: var(--font); color: var(--pd-text-secondary); background: var(--pd-bg-subtle); border: 1px solid var(--pd-border); cursor: pointer; transition: background 0.12s, border-color 0.12s, color 0.12s; line-height: 1.2; }
+      .prompt-chip:hover { background: var(--pd-bg-hover); border-color: var(--pd-border-strong); color: var(--pd-text); }
+      .prompt-chip svg { width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; opacity: 0.6; }
+
+      .chat-messages { display: flex; flex-direction: column; gap: 8px; max-height: 340px; overflow-y: auto; padding-right: 2px; }
+      .chat-messages:empty { display: none; }
+      .chat-messages::-webkit-scrollbar { width: 4px; }
+      .chat-messages::-webkit-scrollbar-track { background: transparent; }
+      .chat-messages::-webkit-scrollbar-thumb { background: var(--pd-border-strong); border-radius: 4px; }
+
+      .msg { display: flex; flex-direction: column; gap: 2px; animation: slideIn 0.15s ease; }
+      .msg-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--pd-text-muted); padding: 0 2px; }
+      .msg-bubble { padding: 9px 11px; border-radius: var(--radius-lg); font-size: 12px; line-height: 1.6; border: 1px solid var(--pd-border); color: var(--pd-text); white-space: pre-wrap; word-break: break-word; }
+      .msg-user { align-items: flex-end; }
+      .msg-user .msg-label { text-align: right; }
+      .msg-user .msg-bubble { background: var(--pd-navy); color: #fff; border-color: var(--pd-navy); }
+      .msg-ai .msg-bubble { background: var(--pd-bg-subtle); }
+
+      .msg-actions { display: flex; gap: 4px; margin-top: 3px; }
+      .msg-copy { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 500; font-family: var(--font); color: var(--pd-text-muted); background: none; border: none; cursor: pointer; padding: 0; transition: color 0.12s; }
+      .msg-copy:hover { color: var(--pd-text-secondary); }
+      .msg-copy svg { width: 10px; height: 10px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+      .thinking { display: flex; align-items: center; gap: 6px; padding: 6px 2px; }
+      .thinking-dots { display: flex; gap: 3px; }
+      .thinking-dots span { width: 5px; height: 5px; border-radius: 50%; background: var(--pd-text-muted); animation: bounce 1.2s ease-in-out infinite; }
+      .thinking-dots span:nth-child(2) { animation-delay: 0.15s; }
+      .thinking-dots span:nth-child(3) { animation-delay: 0.30s; }
+      @keyframes bounce { 0%,60%,100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; } }
+      .thinking-label { font-size: 11px; color: var(--pd-text-muted); }
+
+      .chat-input-row { display: flex; gap: 6px; align-items: flex-end; }
+      .chat-textarea { flex: 1; resize: none; overflow: hidden; min-height: 36px; max-height: 120px; padding: 8px 10px; font-family: var(--font); font-size: 12px; line-height: 1.5; color: var(--pd-text); background: var(--pd-bg); border: 1px solid var(--pd-border-strong); border-radius: var(--radius); outline: none; transition: border-color 0.15s, box-shadow 0.15s; }
+      .chat-textarea::placeholder { color: var(--pd-text-muted); }
+      .chat-textarea:focus { border-color: var(--pd-green); box-shadow: 0 0 0 2px var(--pd-green-alpha); }
+
+      .chat-send { flex-shrink: 0; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; background: var(--pd-green); color: #fff; border: none; border-radius: var(--radius); cursor: pointer; transition: background 0.15s, transform 0.1s; box-shadow: 0 1px 2px rgba(29,185,84,0.25); }
+      .chat-send:hover:not(:disabled) { background: var(--pd-green-dark); }
+      .chat-send:active:not(:disabled) { transform: scale(0.93); }
+      .chat-send:disabled { opacity: 0.45; cursor: not-allowed; }
+      .chat-send svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+
+      .chat-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 2px; }
+      .chat-footer-hint { font-size: 10px; color: var(--pd-text-muted); }
+      .chat-clear { background: none; border: none; font-family: var(--font); font-size: 10px; color: var(--pd-text-muted); cursor: pointer; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+      .chat-clear:hover { color: var(--pd-text-secondary); }
+
+      /* Notice */
+      .notice { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; padding: 10px 12px; background: var(--pd-bg-subtle); border: 1px solid var(--pd-border); border-radius: var(--radius-lg); font-size: 12px; color: var(--pd-text-secondary); line-height: 1.5; }
+      .notice-icon { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; stroke: var(--pd-text-muted); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; }
     </style>
   </head>
-
   <body>
+
+    <!-- Header -->
     <div class="header">
       <div class="logo">
-        <!-- Inline icon: lightning bolt over data rows -->
-        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-          <!-- rows -->
+        <svg viewBox="0 0 24 24">
           <rect x="3" y="13" width="11" height="2.2" rx="1.1" fill="rgba(255,255,255,0.55)"/>
-          <rect x="3" y="16.5" width="8"  height="2.2" rx="1.1" fill="rgba(255,255,255,0.35)"/>
-          <!-- bolt -->
-          <path d="M13 2 L9 11 H12.5 L9.5 22 L18 10 H14 L17 2 Z"
-                fill="#1db954"/>
+          <rect x="3" y="16.5" width="8" height="2.2" rx="1.1" fill="rgba(255,255,255,0.35)"/>
+          <path d="M13 2 L9 11 H12.5 L9.5 22 L18 10 H14 L17 2 Z" fill="#1db954"/>
         </svg>
       </div>
       <div class="header-text">
@@ -364,231 +189,273 @@
       <div class="status-dot" title="Connected"></div>
     </div>
 
-    <button class="btn btn-primary" id="btn-populate">
-      <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="12" y1="8" x2="12" y2="16"/>
-        <line x1="8" y1="12" x2="16" y2="12"/>
-      </svg>
-      Populate missing fields
-    </button>
-    <p class="btn-hint">Only empty fields will be updated</p>
+    <!-- Tabs -->
+    <div class="tabs" id="tabs">
+      <button class="tab tab-active" id="tab-populate" onclick="switchTab('populate')">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        Populate
+      </button>
+      <button class="tab" id="tab-chat" onclick="switchTab('chat')">
+        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        Ask AI
+      </button>
+    </div>
 
+    <!-- Populate tab -->
+    <div class="tab-panel active" id="panel-populate">
+      <button class="btn btn-primary" id="btn-populate">
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
+        </svg>
+        Populate missing fields
+      </button>
+      <p class="btn-hint">Only empty fields will be updated</p>
 
-    <div class="date-range" id="date-range">
-      <div class="date-range-title">
-        <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-        Filter history by date range
-      </div>
-      <div class="date-row">
-        <div class="date-field">
-          <label for="date-from">From</label>
-          <input type="date" id="date-from" />
+      <div class="date-range" id="date-range">
+        <div class="date-range-title">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          Filter history by date range
         </div>
-        <div class="date-field">
-          <label for="date-to">To</label>
-          <input type="date" id="date-to" />
+        <div class="date-row">
+          <div class="date-field"><label for="date-from">From</label><input type="date" id="date-from"/></div>
+          <div class="date-field"><label for="date-to">To</label><input type="date" id="date-to"/></div>
+        </div>
+        <div class="date-hint">
+          Only notes &amp; activities within this range will be included.
+          <button class="date-clear" id="date-clear">Clear dates</button>
         </div>
       </div>
-      <div class="date-hint">
-        Only notes &amp; activities within this range will be included in the summary.
-        <button class="date-clear" id="date-clear">Clear dates</button>
+
+      <div class="result-card" id="result-card">
+        <div class="card-bar" id="card-bar">
+          <svg class="card-bar-icon" id="card-bar-icon" viewBox="0 0 24 24"></svg>
+          <span class="card-bar-text" id="card-bar-text"></span>
+          <span class="card-bar-count" id="card-bar-count"></span>
+        </div>
+        <div class="card-body" id="card-body"></div>
       </div>
     </div>
-    <div class="result-card" id="result-card">
-      <div class="card-bar" id="card-bar">
-        <svg class="card-bar-icon" id="card-bar-icon" viewBox="0 0 24 24"></svg>
-        <span class="card-bar-text" id="card-bar-text"></span>
-        <span class="card-bar-count" id="card-bar-count"></span>
+
+    <!-- Chat tab -->
+    <div class="tab-panel" id="panel-chat">
+      <div class="chat-wrap">
+        <div class="prompt-chips" id="prompt-chips"></div>
+        <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-input-row">
+          <textarea class="chat-textarea" id="chat-input" placeholder="Ask anything about this record…" rows="1"></textarea>
+          <button class="chat-send" id="chat-send" title="Send (Enter)">
+            <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+        <div class="chat-footer">
+          <span class="chat-footer-hint">Record context is included automatically</span>
+          <button class="chat-clear" id="chat-clear">Clear chat</button>
+        </div>
       </div>
-      <div class="card-body" id="card-body"></div>
     </div>
 
     <script>
+    let sdk;
+
+    function switchTab(name) {
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("tab-active"));
+      document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+      document.getElementById("tab-" + name).classList.add("tab-active");
+      document.getElementById("panel-" + name).classList.add("active");
+      setTimeout(resizeToContent, 30);
+    }
+
+    function resizeToContent() {
+      try { sdk && sdk.execute("resize", { height: Math.min(Math.max(document.body.scrollHeight + 16, 220), 620) }); } catch(e) {}
+    }
+
     (async () => {
-      const sdk = await new AppExtensionsSDK().initialize();
-      try { await sdk.execute("resize", { height: 190 }); } catch(e) {}
-
-      const btn        = document.getElementById("btn-populate");
-      const card       = document.getElementById("result-card");
-      const cardBar    = document.getElementById("card-bar");
-      const barIcon    = document.getElementById("card-bar-icon");
-      const barText    = document.getElementById("card-bar-text");
-      const barCount   = document.getElementById("card-bar-count");
-      const cardBody   = document.getElementById("card-body");
-
-      const ICON_PATHS = {
-        success: `<polyline points="20 6 9 17 4 12"/>`,
-        warning: `<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/>`,
-        error:   `<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>`,
-      };
-
-      const CHECK_SVG = `<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`;
-      const GLOBE_SVG = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20"/></svg>`;
-      const DASH_SVG  = `<svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
-
-      function showResult(state, title, countLabel, groups) {
-        card.className = `result-card visible state-${state}`;
-        barIcon.innerHTML = ICON_PATHS[state] || ICON_PATHS.warning;
-        barText.textContent = title;
-        barCount.textContent = countLabel;
-        barCount.style.display = countLabel ? "" : "none";
-        cardBody.innerHTML = "";
-
-        let groupsRendered = 0;
-        groups.forEach(({ label, dotColor, fields, chipCls, iconSvg }) => {
-          if (!fields || fields.length === 0) return;
-          if (groupsRendered > 0) {
-            const div = document.createElement("div");
-            div.className = "divider";
-            cardBody.appendChild(div);
-          }
-          const grp = document.createElement("div");
-          grp.className = "field-group";
-          const dot = dotColor ? `<span class="group-label-dot" style="background:${dotColor}"></span>` : "";
-          const chips = fields.map(f => `<span class="chip ${chipCls}">${iconSvg}${f}</span>`).join("");
-          grp.innerHTML = `
-            <div class="group-label">${dot}${label}</div>
-            <div class="chip-row">${chips}</div>
-          `;
-          cardBody.appendChild(grp);
-          groupsRendered++;
-        });
-
-        if (groupsRendered === 0) {
-          cardBody.style.display = "none";
-        } else {
-          cardBody.style.display = "";
-        }
-
-        const est = 190 + 28 + groupsRendered * 58;
-        try { sdk.execute("resize", { height: Math.min(est, 400) }); } catch(e) {}
-      }
-
-      function setLoading(loading) {
-        btn.disabled = loading;
-        btn.innerHTML = loading
-          ? `<div class="spinner"></div> Searching…`
-          : `<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg> Populate missing fields`;
-      }
+      sdk = await new AppExtensionsSDK().initialize();
+      try { await sdk.execute("resize", { height: 230 }); } catch(e) {}
 
       const params   = Object.fromEntries(new URLSearchParams(location.search));
       const resource = params.resource;
       const id       = params.selectedIds || params.id;
 
-      // Show date range picker only for deals
+      // Person: show notice only
+      if (resource === "person") {
+        document.getElementById("tabs").style.display = "none";
+        document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+        const notice = document.createElement("div");
+        notice.className = "notice";
+        notice.innerHTML = `<svg class="notice-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg><span>Person enrichment isn't available. Open an <strong>Organisation</strong> or <strong>Deal</strong> record.</span>`;
+        document.body.appendChild(notice);
+        try { sdk.execute("resize", { height: 200 }); } catch(e) {}
+        return;
+      }
+
+      // ── Populate tab ──────────────────────────────────────────────
       const dateRange = document.getElementById("date-range");
       const dateFrom  = document.getElementById("date-from");
       const dateTo    = document.getElementById("date-to");
-      const dateClear = document.getElementById("date-clear");
+      document.getElementById("date-clear").addEventListener("click", () => { dateFrom.value = ""; dateTo.value = ""; });
+      if (resource === "deal") dateRange.classList.add("visible");
 
-      if (resource === "deal") {
-        dateRange.classList.add("visible");
-        try { sdk.execute("resize", { height: 290 }); } catch(e) {}
+      const btn      = document.getElementById("btn-populate");
+      const card     = document.getElementById("result-card");
+      const barIcon  = document.getElementById("card-bar-icon");
+      const barText  = document.getElementById("card-bar-text");
+      const barCount = document.getElementById("card-bar-count");
+      const cardBody = document.getElementById("card-body");
+
+      const ICONS = {
+        success: `<polyline points="20 6 9 17 4 12"/>`,
+        warning: `<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/>`,
+        error:   `<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>`,
+      };
+      const CHECK = `<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`;
+      const GLOBE = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20"/></svg>`;
+      const DASH  = `<svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
+
+      function showResult(state, title, countLabel, groups) {
+        card.className = `result-card visible state-${state}`;
+        barIcon.innerHTML = ICONS[state] || ICONS.warning;
+        barText.textContent = title;
+        barCount.textContent = countLabel;
+        barCount.style.display = countLabel ? "" : "none";
+        cardBody.innerHTML = "";
+        let n = 0;
+        groups.forEach(({ label, dotColor, fields, chipCls, icon }) => {
+          if (!fields || !fields.length) return;
+          if (n > 0) { const d = document.createElement("div"); d.className = "divider"; cardBody.appendChild(d); }
+          const g = document.createElement("div"); g.className = "field-group";
+          const dot = dotColor ? `<span class="group-label-dot" style="background:${dotColor}"></span>` : "";
+          g.innerHTML = `<div class="group-label">${dot}${label}</div><div class="chip-row">${fields.map(f=>`<span class="chip ${chipCls}">${icon}${f}</span>`).join("")}</div>`;
+          cardBody.appendChild(g); n++;
+        });
+        cardBody.style.display = n ? "" : "none";
+        setTimeout(resizeToContent, 50);
       }
 
-      dateClear.addEventListener("click", () => {
-        dateFrom.value = "";
-        dateTo.value   = "";
-      });
-
-      if (resource === "person") {
-        const notice = document.createElement("div");
-        notice.className = "notice";
-        notice.innerHTML = `
-          <svg class="notice-icon" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="16" x2="12" y2="12"/>
-            <line x1="12" y1="8" x2="12.01" y2="8"/>
-          </svg>
-          <span>Person enrichment isn't available. Open an <strong>Organisation</strong> or <strong>Deal</strong> record to use DataFielder.</span>
-        `;
-        document.body.appendChild(notice);
-        btn.disabled = true;
-        try { sdk.execute("resize", { height: 248 }); } catch(e) {}
+      function setLoading(on) {
+        btn.disabled = on;
+        btn.innerHTML = on
+          ? `<div class="spinner"></div> Searching…`
+          : `<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg> Populate missing fields`;
       }
 
       btn.addEventListener("click", async () => {
-        if (!resource || !id) {
-          showResult("error", "Missing context", "", [
-            { label: "Details", fields: ["Open this panel from a record page"], chipCls: "chip-grey", iconSvg: DASH_SVG },
+        if (!resource || !id) { showResult("error","Missing context","",[{label:"Error",fields:["Open from a record page"],chipCls:"chip-grey",icon:DASH}]); return; }
+        setLoading(true); card.classList.remove("visible");
+        try {
+          const res  = await fetch("/api/populate", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({resource, id, companyId:params.companyId, userId:params.userId, date_from:dateFrom.value, date_to:dateTo.value}) });
+          const data = await res.json();
+          if (!res.ok) { showResult("error","Could not populate fields","",[{label:"Error",fields:[data.error||"Something went wrong"],chipCls:"chip-grey",icon:DASH}]); return; }
+          const msg = data.message || "";
+          if (msg.includes("already filled") || msg.includes("Nothing to do")) { showResult("warning","Already up to date","No changes",[{label:"Status",fields:["All fields already have values"],chipCls:"chip-grey",icon:DASH}]); return; }
+          const fw = data.filled_website||[], fb = data.filled_web||[], nf = data.not_found||[], total = fw.length+fb.length;
+          showResult("success","Fields populated",`${total} updated`,[
+            {label:"From website",   dotColor:"#1db954",fields:fw,chipCls:"chip-green",icon:CHECK},
+            {label:"From web search",dotColor:"#2563eb",fields:fb,chipCls:"chip-blue", icon:GLOBE},
+            {label:"Not found",      dotColor:"#9ca3af",fields:nf,chipCls:"chip-grey", icon:DASH},
           ]);
-          return;
-        }
+        } catch(e) { showResult("error","Network error","",[{label:"Details",fields:[String(e)],chipCls:"chip-grey",icon:DASH}]); }
+        finally { setLoading(false); }
+      });
 
-        setLoading(true);
-        // hide old card during load
-        card.classList.remove("visible");
+      // ── Chat tab ───────────────────────────────────────────────────
+      const QUICK = {
+        deal: [
+          {svg:`<svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>`, text:"Draft follow-up email"},
+          {svg:`<svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`, text:"Summarise this deal"},
+          {svg:`<svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>`, text:"What are next steps?"},
+          {svg:`<svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`, text:"Identify risks"},
+        ],
+        organization: [
+          {svg:`<svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>`, text:"Draft intro email"},
+          {svg:`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`, text:"Company overview"},
+          {svg:`<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>`, text:"Who should I contact?"},
+        ],
+      };
+
+      const chipsEl = document.getElementById("prompt-chips");
+      (QUICK[resource] || QUICK.deal).forEach(p => {
+        const b = document.createElement("button");
+        b.className = "prompt-chip";
+        b.innerHTML = `${p.svg}${p.text}`;
+        b.addEventListener("click", () => sendChat(p.text));
+        chipsEl.appendChild(b);
+      });
+
+      const msgsEl   = document.getElementById("chat-messages");
+      const inputEl  = document.getElementById("chat-input");
+      const sendBtn  = document.getElementById("chat-send");
+      document.getElementById("chat-clear").addEventListener("click", () => { history = []; ctxCache = ""; msgsEl.innerHTML = ""; setTimeout(resizeToContent, 20); });
+
+      let history  = [];
+      let ctxCache = "";
+
+      inputEl.addEventListener("input", () => { inputEl.style.height = "auto"; inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + "px"; setTimeout(resizeToContent, 10); });
+      inputEl.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(); } });
+      sendBtn.addEventListener("click", doSend);
+
+      function doSend() { const t = inputEl.value.trim(); if (t) sendChat(t); }
+
+      async function sendChat(text) {
+        inputEl.value = "";
+        inputEl.style.height = "auto";
+        appendBubble("user", text);
+        history.push({ role: "user", content: text });
+        sendBtn.disabled = true;
+        const thinking = appendThinking();
+        setTimeout(resizeToContent, 20);
+
+        // Load context once
+        if (!ctxCache && resource && id) {
+          try {
+            const r = await fetch("/api/context", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({resource, id, companyId:params.companyId}) });
+            if (r.ok) { const d = await r.json(); ctxCache = d.context || ""; }
+          } catch(e) {}
+        }
 
         try {
-          const res  = await fetch("/api/populate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              resource,
-              id,
-              companyId: params.companyId,
-              userId:    params.userId,
-              date_from: dateFrom ? dateFrom.value : "",
-              date_to:   dateTo   ? dateTo.value   : "",
-            }),
-          });
-
+          const res  = await fetch("/api/chat", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({messages: history, context: ctxCache, companyId: params.companyId}) });
           const data = await res.json();
-
-          if (!res.ok) {
-            showResult("error", "Could not populate fields", "", [
-              { label: "Error", fields: [data.error || "Something went wrong"], chipCls: "chip-grey", iconSvg: DASH_SVG },
-            ]);
-            return;
-          }
-
-          const msg = data.message || "";
-
-          if (msg.includes("already filled") || msg.includes("Nothing to do")) {
-            showResult("warning", "Already up to date", "No changes", [
-              { label: "Status", fields: ["All fields already have values"], chipCls: "chip-grey", iconSvg: DASH_SVG },
-            ]);
-            return;
-          }
-
-          const fromWebsite = data.filled_website || [];
-          const fromWeb     = data.filled_web     || [];
-          const notFound    = data.not_found       || [];
-          const total       = fromWebsite.length + fromWeb.length;
-
-          showResult("success", `Fields populated`, `${total} updated`, [
-            {
-              label:    "From website",
-              dotColor: "#1db954",
-              fields:   fromWebsite,
-              chipCls:  "chip-green",
-              iconSvg:  CHECK_SVG,
-            },
-            {
-              label:    "From web search",
-              dotColor: "#2563eb",
-              fields:   fromWeb,
-              chipCls:  "chip-blue",
-              iconSvg:  GLOBE_SVG,
-            },
-            {
-              label:    "Not found",
-              dotColor: "#9ca3af",
-              fields:   notFound,
-              chipCls:  "chip-grey",
-              iconSvg:  DASH_SVG,
-            },
-          ]);
-
-        } catch(err) {
-          showResult("error", "Network error", "", [
-            { label: "Details", fields: [String(err)], chipCls: "chip-grey", iconSvg: DASH_SVG },
-          ]);
+          thinking.remove();
+          const reply = data.reply || data.error || "No response.";
+          appendBubble("ai", reply);
+          history.push({ role: "assistant", content: reply });
+        } catch(e) {
+          thinking.remove();
+          appendBubble("ai", "Network error — please try again.");
         } finally {
-          setLoading(false);
+          sendBtn.disabled = false;
+          inputEl.focus();
+          setTimeout(resizeToContent, 50);
         }
-      });
+      }
+
+      function appendBubble(role, text) {
+        const wrap = document.createElement("div");
+        wrap.className = `msg msg-${role === "user" ? "user" : "ai"}`;
+        const lbl = document.createElement("div"); lbl.className = "msg-label"; lbl.textContent = role === "user" ? "You" : "AI";
+        const bbl = document.createElement("div"); bbl.className = "msg-bubble"; bbl.textContent = text;
+        wrap.appendChild(lbl); wrap.appendChild(bbl);
+        if (role === "ai") {
+          const acts = document.createElement("div"); acts.className = "msg-actions";
+          const cp = document.createElement("button"); cp.className = "msg-copy";
+          cp.innerHTML = `<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>Copy`;
+          cp.addEventListener("click", () => { navigator.clipboard.writeText(text).then(() => { cp.innerHTML = `<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Copied!`; setTimeout(()=>{ cp.innerHTML=`<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>Copy`; },1500); }); });
+          acts.appendChild(cp); wrap.appendChild(acts);
+        }
+        msgsEl.appendChild(wrap);
+        msgsEl.scrollTop = msgsEl.scrollHeight;
+        return wrap;
+      }
+
+      function appendThinking() {
+        const el = document.createElement("div"); el.className = "thinking";
+        el.innerHTML = `<div class="thinking-dots"><span></span><span></span><span></span></div><span class="thinking-label">Thinking…</span>`;
+        msgsEl.appendChild(el); msgsEl.scrollTop = msgsEl.scrollHeight;
+        return el;
+      }
+
+      resizeToContent();
     })();
     </script>
   </body>
