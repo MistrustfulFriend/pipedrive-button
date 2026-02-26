@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import sqlite3
 import time
+from openai import OpenAI
 
 app = FastAPI()
 
@@ -13,10 +14,20 @@ PIPEDRIVE_CLIENT_ID = os.getenv("PIPEDRIVE_CLIENT_ID", "")
 REDIRECT_URI = f"{BASE_URL}/oauth/callback"
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Custom field API keys
 FIELD_KEYS = {
-    "deal": {"deal_context": "e637e09d69529de9a304c5a82a7a16eccee68c83"},          # put API key here
-    "person": {"background": "ea9b03ac0608816c4dbe05a2ce5109ff8276aab8"},          # put API key here
-    "organization": {"about": "fd1f632d86b97eb74f18daadc8ea6d0afaf0f6a2"},         # put API key here
+    "deal": {
+        "deal_context": "e637e09d69529de9a304c5a82a7a16eccee68c83",
+    },
+    "person": {
+        "linkedin": "6c01a20f553c1d1ab860a7396a65f55667d623d8",   # LinkedIn URL field
+        "background": "ea9b03ac0608816c4dbe05a2ce5109ff8276aab8",  # Background field (target)
+    },
+    "organization": {
+        "linkedin": "dce5d063616e3008d850b211ef4072181a02e02e",    # LinkedIn URL field
+        "website": "website",                                        # Website field (standard)
+        "about": "fd1f632d86b97eb74f18daadc8ea6d0afaf0f6a2",        # About field (target)
+    },
 }
 
 DB_PATH = "tokens.db"
@@ -57,61 +68,118 @@ def load_tokens(company_id: str):
         return None
     return {"access_token": row[0], "refresh_token": row[1], "expires_at": row[2]}
 
-def ai_write_summary(resource: str, record: dict) -> str:
+
+def fetch_website_text(url: str) -> str:
+    """Fetch and return cleaned plain text from a URL (max 8000 chars)."""
+    if not url:
+        return ""
+    if not url.startswith("http"):
+        url = "https://" + url
+
+    try:
+        r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return ""
+    except Exception:
+        return ""
+
+    html = r.text
+
+    # Remove script and style blocks
+    for tag in ["<script", "<style"]:
+        while True:
+            i = html.lower().find(tag)
+            if i == -1:
+                break
+            j = html.lower().find("</", i)
+            if j == -1:
+                break
+            k = html.find(">", j)
+            if k == -1:
+                break
+            html = html[:i] + html[k + 1:]
+
+    # Strip remaining HTML tags
+    text = []
+    in_tag = False
+    for ch in html:
+        if ch == "<":
+            in_tag = True
+            continue
+        if ch == ">":
+            in_tag = False
+            continue
+        if not in_tag:
+            text.append(ch)
+
+    cleaned = " ".join("".join(text).split())
+    return cleaned[:8000]
+
+
+def ai_write_summary(resource: str, record: dict, extra_context: dict = None) -> str:
     """
-    Returns a short summary string for:
-      - person -> 'Background'
-      - organization -> 'About'
-      - deal -> 'Deal Context'
+    Generate a short AI summary for a CRM record.
+    extra_context can contain scraped text from LinkedIn or website.
     """
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("Missing OPENAI_API_KEY env var")
 
-    # Build the prompt from what we already have in Pipedrive
-    # (Later we can enrich it with website text / web search)
+    extra_context = extra_context or {}
+
     if resource == "person":
         name = record.get("name")
         emails = record.get("email")
         phones = record.get("phone")
-        org = (record.get("org_id") or {}).get("name") if isinstance(record.get("org_id"), dict) else record.get("org_id")
-
-        # Try to find a LinkedIn URL if it exists in the record (custom field or standard field)
-        linkedin_url = None
-        for k, v in record.items():
-            if "linkedin" in str(k).lower() and isinstance(v, str) and v.startswith("http"):
-                linkedin_url = v
-                break
+        org = (
+            (record.get("org_id") or {}).get("name")
+            if isinstance(record.get("org_id"), dict)
+            else record.get("org_id")
+        )
+        linkedin_url = record.get(FIELD_KEYS["person"]["linkedin"], "")
+        linkedin_text = extra_context.get("linkedin_text", "")
 
         user_text = f"""
 Create a short professional background (3-6 sentences) for a CRM contact.
 
 Person name: {name}
-Org: {org}
+Organisation: {org}
 Emails: {emails}
 Phones: {phones}
-LinkedIn URL (reference only; do not claim you read it unless content is provided): {linkedin_url}
+LinkedIn URL: {linkedin_url}
+{f"LinkedIn page content (use this as primary source):{chr(10)}{linkedin_text}" if linkedin_text else ""}
 
 Rules:
-- If info is missing, be conservative and do not invent facts.
-- Keep it concise and useful for sales.
+- Use only facts that are present in the data above; do not invent anything.
+- Keep it concise and useful for a sales context.
 - Output plain text only.
 """.strip()
 
     elif resource == "organization":
         name = record.get("name")
-        website = record.get("website") or record.get("websites")  # sometimes varies
+        website_url = record.get("website") or record.get(FIELD_KEYS["organization"]["website"]) or ""
         address = record.get("address")
+        linkedin_url = record.get(FIELD_KEYS["organization"]["linkedin"], "")
+        website_text = extra_context.get("website_text", "")
+        linkedin_text = extra_context.get("linkedin_text", "")
+
+        context_block = ""
+        if website_text:
+            context_block += f"\nWebsite content (use as primary source):\n{website_text}\n"
+        if linkedin_text:
+            context_block += f"\nLinkedIn page content:\n{linkedin_text}\n"
 
         user_text = f"""
-Write a short "About" paragraph (3-6 sentences) for a CRM organization.
+Write a short "About" paragraph (3-6 sentences) for a CRM organisation.
 
 Company name: {name}
-Website: {website}
+Website: {website_url}
+LinkedIn URL: {linkedin_url}
 Address: {address}
+{context_block}
 
 Rules:
-- If you cannot access the website content, do not invent specifics.
-- Keep it concise, business-focused, no hype.
+- Use only facts present in the data above; do not invent specifics.
+- Keep it concise and business-focused.
 - Output plain text only.
 """.strip()
 
@@ -120,8 +188,16 @@ Rules:
         value = record.get("value")
         currency = record.get("currency")
         stage = record.get("stage_id")
-        org = (record.get("org_id") or {}).get("name") if isinstance(record.get("org_id"), dict) else record.get("org_id")
-        person = (record.get("person_id") or {}).get("name") if isinstance(record.get("person_id"), dict) else record.get("person_id")
+        org = (
+            (record.get("org_id") or {}).get("name")
+            if isinstance(record.get("org_id"), dict)
+            else record.get("org_id")
+        )
+        person = (
+            (record.get("person_id") or {}).get("name")
+            if isinstance(record.get("person_id"), dict)
+            else record.get("person_id")
+        )
 
         user_text = f"""
 Write a short deal context note (3-6 sentences) for a CRM deal.
@@ -129,7 +205,7 @@ Write a short deal context note (3-6 sentences) for a CRM deal.
 Deal title: {title}
 Value: {value} {currency}
 Stage: {stage}
-Organization: {org}
+Organisation: {org}
 Primary person: {person}
 
 Rules:
@@ -138,7 +214,6 @@ Rules:
 - Output plain text only.
 """.strip()
 
-    # Call OpenAI Responses API
     resp = openai_client.responses.create(
         model="gpt-4.1-mini",
         input=[
@@ -147,6 +222,7 @@ Rules:
         ],
     )
     return resp.output_text.strip()
+
 
 # ---------------------------
 # Panel (embedded in Pipedrive)
@@ -165,7 +241,7 @@ def health():
 
 
 # ---------------------------
-# OAuth (needed to get tokens)
+# OAuth
 # ---------------------------
 @app.get("/oauth/start")
 def oauth_start():
@@ -209,12 +285,10 @@ def oauth_callback(request: Request):
         )
 
     tokens = r.json()
-
     access_token = tokens["access_token"]
     refresh_token = tokens["refresh_token"]
     expires_in = tokens.get("expires_in", 3600)
 
-    # Get company_id from Pipedrive using the access token
     me = requests.get(
         "https://api.pipedrive.com/v1/users/me",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -225,15 +299,18 @@ def oauth_callback(request: Request):
 
     save_tokens(company_id, access_token, refresh_token, int(expires_in))
 
-    # Confirm success (do NOT display tokens)
     return {
         "ok": True,
         "got_access_token": bool(tokens.get("access_token")),
         "got_refresh_token": bool(tokens.get("refresh_token")),
         "expires_in": tokens.get("expires_in"),
-        "note": "Next step: store tokens securely per company/user",
+        "note": "OAuth complete. Tokens saved.",
     }
 
+
+# ---------------------------
+# Main populate endpoint
+# ---------------------------
 @app.post("/api/populate")
 async def api_populate(payload: dict):
     resource = payload.get("resource")           # "deal" / "person" / "organization"
@@ -248,49 +325,77 @@ async def api_populate(payload: dict):
         return JSONResponse({"error": "Not connected. Run /oauth/start once."}, status_code=401)
 
     access_token = tokens["access_token"]
-
-    # Pipedrive endpoints
+    headers = {"Authorization": f"Bearer {access_token}"}
     base = "https://api.pipedrive.com/v1"
+
+    # ── Determine target field key ──────────────────────────────────────────
     if resource == "deal":
         get_url = f"{base}/deals/{record_id}"
         put_url = f"{base}/deals/{record_id}"
-        field_key = FIELD_KEYS["deal"]["deal_context"]
+        target_field = FIELD_KEYS["deal"]["deal_context"]
+
     elif resource == "person":
         get_url = f"{base}/persons/{record_id}"
         put_url = f"{base}/persons/{record_id}"
-        field_key = FIELD_KEYS["person"]["background"]
-    else:
+        target_field = FIELD_KEYS["person"]["background"]
+
+    else:  # organization
         get_url = f"{base}/organizations/{record_id}"
         put_url = f"{base}/organizations/{record_id}"
-        field_key = FIELD_KEYS["organization"]["about"]
+        target_field = FIELD_KEYS["organization"]["about"]
 
-    if not field_key:
-        return JSONResponse({"error": "Field API key not configured yet."}, status_code=500)
+    if not target_field:
+        return JSONResponse({"error": "Target field API key not configured."}, status_code=500)
 
-    # Fetch record
-    r = requests.get(get_url, headers={"Authorization": f"Bearer {access_token}"}, timeout=30)
+    # ── Fetch the record ────────────────────────────────────────────────────
+    r = requests.get(get_url, headers=headers, timeout=30)
     if r.status_code != 200:
         return JSONResponse({"error": "Failed to fetch record", "body": r.text}, status_code=400)
 
     data = r.json().get("data", {})
-    current_value = data.get(field_key)
 
-    # Only fill if empty
+    # ── Guard: skip if target field is already filled ───────────────────────
+    current_value = data.get(target_field)
     if current_value not in (None, "", []):
         return {"ok": True, "message": "Field already filled. Nothing to do."}
 
+    # ── Gather extra context (LinkedIn / website scraping) ──────────────────
+    extra_context: dict = {}
+
+    if resource == "person":
+        linkedin_url = data.get(FIELD_KEYS["person"]["linkedin"], "")
+        if linkedin_url:
+            # LinkedIn blocks scrapers; we pass the URL to the AI for context
+            # but don't attempt to scrape it (returns 999 / redirect wall).
+            # If you add a LinkedIn scraping service later, call it here.
+            extra_context["linkedin_text"] = ""  # placeholder for future enrichment
+
+    elif resource == "organization":
+        # 1. Try website
+        website_url = data.get("website") or data.get(FIELD_KEYS["organization"]["website"]) or ""
+        if isinstance(website_url, list):
+            # Pipedrive sometimes returns website as a list of dicts
+            website_url = website_url[0].get("value", "") if website_url else ""
+        if website_url:
+            extra_context["website_text"] = fetch_website_text(website_url)
+
+        # 2. LinkedIn URL (passed to AI as a hint; scraping blocked by LinkedIn)
+        linkedin_url = data.get(FIELD_KEYS["organization"]["linkedin"], "")
+        extra_context["linkedin_url"] = linkedin_url  # used in prompt
+
+    # ── Generate AI summary ─────────────────────────────────────────────────
     try:
-        ai_text = ai_write_summary(resource, data)
+        ai_text = ai_write_summary(resource, data, extra_context)
     except Exception as e:
         return JSONResponse({"error": "AI generation failed", "details": str(e)}, status_code=500)
 
-    update = {field_key: ai_text}
-
-    u = requests.put(put_url, json=update, headers={"Authorization": f"Bearer {access_token}"}, timeout=30)
+    # ── Write back to Pipedrive ─────────────────────────────────────────────
+    u = requests.put(put_url, json={target_field: ai_text}, headers=headers, timeout=30)
     if u.status_code != 200:
         return JSONResponse({"error": "Failed to update record", "body": u.text}, status_code=400)
 
-    return {"ok": True, "message": "Done. Filled 1 field."}
+    return {"ok": True, "message": "Done. Field populated successfully."}
 
-# Static files (panel.html and any JS/CSS if you add later)
+
+# Static files (panel.html and any JS/CSS)
 app.mount("/static", StaticFiles(directory="static"), name="static")
