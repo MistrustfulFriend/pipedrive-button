@@ -99,6 +99,44 @@ def load_tokens(company_id):
     return {"access_token": row[0], "refresh_token": row[1], "expires_at": row[2]}
 
 
+def refresh_access_token(company_id: str, refresh_token: str):
+    """Exchange a refresh token for a new access token. Saves and returns new tokens, or None on failure."""
+    client_id     = os.getenv("PIPEDRIVE_CLIENT_ID", "")
+    client_secret = os.getenv("PIPEDRIVE_CLIENT_SECRET", "")
+    if not client_id or not client_secret:
+        return None
+    try:
+        r = requests.post(
+            "https://oauth.pipedrive.com/oauth/token",
+            data={
+                "grant_type":    "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id":     client_id,
+                "client_secret": client_secret,
+            },
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return None
+        t = r.json()
+        save_tokens(company_id, t["access_token"], t["refresh_token"], int(t.get("expires_in", 3600)))
+        return t["access_token"]
+    except Exception:
+        return None
+
+
+def get_valid_token(company_id: str):
+    """Return a valid access token, refreshing automatically if expired. Returns None if not connected."""
+    tokens = load_tokens(company_id)
+    if not tokens:
+        return None
+    # Refresh if expired or expiring within 5 minutes
+    if int(time.time()) >= tokens["expires_at"] - 300:
+        new_token = refresh_access_token(company_id, tokens["refresh_token"])
+        return new_token  # None if refresh failed
+    return tokens["access_token"]
+
+
 def save_oauth_state(state):
     conn = sqlite3.connect(DB_PATH)
     conn.execute("INSERT INTO oauth_states(state, created_at) VALUES (?, ?)", (state, int(time.time())))
@@ -677,11 +715,10 @@ async def api_populate(payload: dict):
             status_code=400,
         )
 
-    tokens = load_tokens(company_id)
-    if not tokens:
-        return JSONResponse({"error": "Not connected. Run /oauth/start once."}, status_code=401)
+    access_token = get_valid_token(company_id)
+    if not access_token:
+        return JSONResponse({"error": "Not connected or token expired. Re-authenticate via /oauth/start."}, status_code=401)
 
-    access_token = tokens["access_token"]
     headers      = {"Authorization": f"Bearer {access_token}"}
     base         = "https://api.pipedrive.com/v1"
 
@@ -724,7 +761,11 @@ async def api_populate(payload: dict):
     # ── Organisation ─────────────────────────────────────────────────────────
     r = requests.get(f"{base}/organizations/{record_id}", headers=headers, timeout=30)
     if r.status_code != 200:
-        return JSONResponse({"error": "Failed to fetch organisation", "body": r.text}, status_code=400)
+        return JSONResponse({
+            "error": f"Pipedrive returned HTTP {r.status_code} when fetching the organisation. "
+                      "If this is a 401, your token has expired - re-authenticate via /oauth/start.",
+            "body": r.text[:300],
+        }, status_code=400)
 
     data = r.json().get("data", {})
 
@@ -918,11 +959,11 @@ async def api_context(payload: dict):
     if resource in ("organisation", "organization"):
         resource = "organization"
 
-    tokens = load_tokens(company_id)
-    if not tokens:
+    access_token = get_valid_token(company_id)
+    if not access_token:
         return {"context": ""}
 
-    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    headers = {"Authorization": f"Bearer {access_token}"}
     base    = "https://api.pipedrive.com/v1"
     lines   = []
 
