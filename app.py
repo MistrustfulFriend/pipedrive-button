@@ -7,7 +7,6 @@ import sqlite3
 import time
 
 app = FastAPI()
-db_init()
 
 BASE_URL = os.getenv("BASE_URL", "https://pipedrive-button.onrender.com")
 PIPEDRIVE_CLIENT_ID = os.getenv("PIPEDRIVE_CLIENT_ID", "")
@@ -33,6 +32,8 @@ def db_init():
     """)
     conn.commit()
     conn.close()
+
+db_init()
 
 def save_tokens(company_id: str, access_token: str, refresh_token: str, expires_in: int):
     expires_at = int(time.time()) + int(expires_in) - 60  # 60s safety margin
