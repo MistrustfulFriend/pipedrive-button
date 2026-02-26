@@ -2,42 +2,73 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>DataFielder Panel</title>
+    <title>DataFielder</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <!-- App Extensions SDK via CDN (no bundler needed) -->
     <script src="https://cdn.jsdelivr.net/npm/@pipedrive/app-extensions-sdk@0/dist/index.umd.js"></script>
 
     <style>
       body { font-family: system-ui, Arial; padding: 12px; }
-      button { padding: 8px 10px; cursor: pointer; }
-      pre { background: #f4f4f4; padding: 10px; border-radius: 8px; overflow: auto; }
+      button { padding: 10px 12px; cursor: pointer; width: 100%; }
+      .muted { color: #666; font-size: 12px; margin-top: 8px; }
+      .status { margin-top: 10px; padding: 10px; background: #f4f4f4; border-radius: 8px; font-size: 13px; white-space: pre-wrap; }
     </style>
   </head>
 
   <body>
     <h3>DataFielder</h3>
-    <p>This is inside Pipedrive (panel iframe).</p>
 
-    <button id="btn">Show context</button>
-    <pre id="out">Waiting…</pre>
+    <button id="populate">Populate missing fields</button>
+    <div class="muted">Fills only empty fields for this record.</div>
+
+    <div id="status" class="status">Ready.</div>
 
     <script>
       (async () => {
-        // Initialize SDK (required for custom UI extensions)
         const sdk = await new AppExtensionsSDK().initialize();
+        const statusEl = document.getElementById("status");
 
-        document.getElementById("btn").addEventListener("click", async () => {
-          // At minimum, you can read the URL params (deal id etc.)
-          const params = Object.fromEntries(new URLSearchParams(location.search));
-          document.getElementById("out").textContent = JSON.stringify(params, null, 2);
+        // Make panel height nice
+        try { await sdk.execute("resize", { height: 220 }); } catch (e) {}
+
+        function setStatus(msg) { statusEl.textContent = msg; }
+
+        // Context from URL
+        const params = Object.fromEntries(new URLSearchParams(location.search));
+        const resource = params.resource;      // person / deal / organization
+        const id = params.selectedIds || params.id; // usually selectedIds contains the record id
+
+        document.getElementById("populate").addEventListener("click", async () => {
+          if (!resource || !id) {
+            setStatus("Error: missing context (resource or id). Open this panel from a record page.");
+            return;
+          }
+
+          setStatus("Working…");
+
+          try {
+            const res = await fetch("/api/populate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                resource,
+                id,
+                companyId: params.companyId,
+                userId: params.userId
+              })
+            });
+
+            const data = await res.json();
+            if (!res.ok) {
+              setStatus("Error:\n" + JSON.stringify(data, null, 2));
+              return;
+            }
+
+            setStatus(data.message || "Done.");
+          } catch (err) {
+            setStatus("Network error: " + String(err));
+          }
         });
-
-        // Optional: ask Pipedrive to resize the iframe to fit content
-        // (You can fine-tune later)
-        try {
-          await sdk.execute("resize", { height: 420 });
-        } catch (e) {}
       })();
     </script>
   </body>
