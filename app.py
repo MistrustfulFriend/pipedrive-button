@@ -17,27 +17,33 @@ PIPEDRIVE_CLIENT_ID = os.getenv("PIPEDRIVE_CLIENT_ID", "")
 REDIRECT_URI = f"{BASE_URL}/oauth/callback"
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ── Field keys ────────────────────────────────────────────────────────────────
-# Standard Pipedrive fields use their plain name as the key.
-# Custom fields use their 40-char hash.
+# ── Field definitions ─────────────────────────────────────────────────────────
+# web_searchable: whether a targeted web search makes sense for this field
 ORG_FIELDS = {
-    # Standard fields
-    "address":        {"key": "address",        "type": "address",  "label": "Address"},
-    "industry":       {"key": "industry",        "type": "enum",     "label": "Industry"},
-    "annual_revenue": {"key": "annual_revenue",  "type": "number",   "label": "Annual Revenue"},
-    "employee_count": {"key": "employee_count",  "type": "number",   "label": "Number of Employees"},
-    # Standard fields that need special array format
-    "phone":          {"key": "phone",           "type": "phone",    "label": "Phone Number"},
-    "email":          {"key": "email",           "type": "email",    "label": "Email"},
-    # Custom fields (hashes)
-    "about":          {"key": "fd1f632d86b97eb74f18daadc8ea6d0afaf0f6a2", "type": "text",  "label": "About"},
-    "email2":         {"key": "901f73bf1243fa0baa769a41aef100674e792616",  "type": "text",  "label": "Second Email"},
-    "linkedin":       {"key": "linkedin",                                   "type": "text",  "label": "LinkedIn Profile"},
-    "culture":        {"key": "f2de3e23b45d3ffa67abf8fdea7564c14f6ff9bb",  "type": "text",  "label": "Company Culture & Values"},
+    "address":        {"key": "address",                                       "type": "address", "label": "Address",                   "web_searchable": True},
+    "industry":       {"key": "industry",                                      "type": "enum",    "label": "Industry",                   "web_searchable": False},
+    "annual_revenue": {"key": "annual_revenue",                                "type": "number",  "label": "Annual Revenue",             "web_searchable": True},
+    "employee_count": {"key": "employee_count",                                "type": "number",  "label": "Number of Employees",        "web_searchable": True},
+    "phone":          {"key": "phone",                                         "type": "phone",   "label": "Phone Number",               "web_searchable": True},
+    "email":          {"key": "email",                                         "type": "email",   "label": "Email",                      "web_searchable": True},
+    "email2":         {"key": "901f73bf1243fa0baa769a41aef100674e792616",      "type": "text",    "label": "Second Email",               "web_searchable": False},
+    "linkedin":       {"key": "linkedin",                                      "type": "text",    "label": "LinkedIn Profile",           "web_searchable": True},
+    "about":          {"key": "fd1f632d86b97eb74f18daadc8ea6d0afaf0f6a2",      "type": "text",    "label": "About",                      "web_searchable": False},
+    "culture":        {"key": "f2de3e23b45d3ffa67abf8fdea7564c14f6ff9bb",      "type": "text",    "label": "Company Culture & Values",   "web_searchable": False},
 }
 
 DEAL_FIELDS = {
     "deal_context": {"key": "e637e09d69529de9a304c5a82a7a16eccee68c83", "type": "text", "label": "Deal Context"},
+}
+
+# Web search queries per field — {company_name} and {domain} are substituted at runtime
+WEB_SEARCH_QUERIES = {
+    "phone":          '"{company_name}" phone number contact',
+    "email":          '"{company_name}" contact email {domain}',
+    "address":        '"{company_name}" office address headquarters {domain}',
+    "linkedin":       '"{company_name}" LinkedIn company page site:linkedin.com/company',
+    "annual_revenue": '"{company_name}" annual revenue turnover {domain}',
+    "employee_count": '"{company_name}" number of employees headcount {domain}',
 }
 
 DB_PATH = "tokens.db"
@@ -115,11 +121,7 @@ def consume_oauth_state(state):
 # Pipedrive helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
-def get_industry_options(access_token: str) -> list[dict]:
-    """
-    Fetches the list of valid options for the Industry enum field.
-    Returns a list of {"id": int, "label": str} dicts.
-    """
+def get_industry_options(access_token: str) -> list:
     r = requests.get(
         "https://api.pipedrive.com/v1/organizationFields",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -134,14 +136,12 @@ def get_industry_options(access_token: str) -> list[dict]:
 
 
 def is_empty(value) -> bool:
-    """Returns True if a Pipedrive field value counts as empty."""
     if value is None:
         return True
     if isinstance(value, str) and value.strip() == "":
         return True
     if isinstance(value, list) and len(value) == 0:
         return True
-    # Phone/email arrays: treat as empty if all entries have no value
     if isinstance(value, list) and all(not (v.get("value") or "").strip() for v in value if isinstance(v, dict)):
         return True
     return False
@@ -193,126 +193,169 @@ def fetch_website_text(url: str) -> str:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# AI extraction
+# AI extraction helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
-def ai_extract_org_fields(
+def build_field_instructions(fields: list, industry_options: list) -> str:
+    lines = []
+    for f in fields:
+        info  = ORG_FIELDS[f]
+        ftype = info["type"]
+
+        if f == "industry":
+            opts = ", ".join(f'"{o["label"]}"' for o in industry_options)
+            lines.append(f'- "industry": Choose EXACTLY one from [{opts}]. Return null if none fit.')
+        elif f == "annual_revenue":
+            lines.append('- "annual_revenue": Annual revenue as a plain number (no symbols/commas). E.g. 5000000. Null if not found.')
+        elif f == "employee_count":
+            lines.append('- "employee_count": Number of employees as a plain integer. If a range, use the midpoint. Null if not found.')
+        elif f == "phone":
+            lines.append('- "phone": Primary phone number as a plain string including country code if present. Null if not found.')
+        elif f == "email":
+            lines.append('- "email": Primary contact email address. Null if not found.')
+        elif f == "email2":
+            lines.append('- "email2": A secondary/alternative contact email different from the primary. Null if not found.')
+        elif f == "linkedin":
+            lines.append('- "linkedin": Company LinkedIn URL (linkedin.com/company/...). Null if not found.')
+        elif f == "address":
+            lines.append('- "address": Full office/headquarters address as a single string. Null if not found.')
+        elif f == "about":
+            lines.append('- "about": 4-6 sentence plain-text description: what they do, industry, size, location, specialities.')
+        elif f == "culture":
+            lines.append('- "culture": 2-4 sentences on company culture, values, or work environment. Null if nothing relevant found.')
+    return "\n".join(lines)
+
+
+def parse_json_response(raw: str) -> dict:
+    raw = raw.strip()
+    raw = re.sub(r"^```[a-z]*\n?", "", raw)
+    raw = re.sub(r"\n?```$", "", raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PASS 1 — Extract from website text
+# ──────────────────────────────────────────────────────────────────────────────
+
+def ai_extract_from_website(
     name: str,
     website_url: str,
     website_text: str,
-    fields_to_fill: list[str],
-    industry_options: list[dict],
+    fields: list,
+    industry_options: list,
 ) -> dict:
-    """
-    Asks the AI to extract all requested fields from the website text in one call.
-    Returns a dict of {field_name: extracted_value}.
-    For industry, returns the label string (we map to ID afterwards).
-    """
-
-    # Build the list of fields to extract, with instructions per type
-    field_instructions = []
-    for f in fields_to_fill:
-        info = ORG_FIELDS[f]
-        label = info["label"]
-        ftype = info["type"]
-
-        if ftype == "enum" and f == "industry":
-            options_str = ", ".join(f'"{o["label"]}"' for o in industry_options)
-            field_instructions.append(
-                f'- "{f}": The industry. Choose EXACTLY one label from this list: [{options_str}]. '
-                f'If none fit, return null.'
-            )
-        elif ftype == "number" and f == "annual_revenue":
-            field_instructions.append(
-                f'- "{f}": Annual revenue as a plain number (no currency symbol, no commas). '
-                f'E.g. 5000000. Return null if not found.'
-            )
-        elif ftype == "number" and f == "employee_count":
-            field_instructions.append(
-                f'- "{f}": Number of employees as a plain integer. '
-                f'If a range is given (e.g. "50-200"), use the midpoint. Return null if not found.'
-            )
-        elif ftype == "phone":
-            field_instructions.append(
-                f'- "{f}": Primary phone number as a plain string including country code if present. '
-                f'Return null if not found.'
-            )
-        elif ftype in ("email", "text") and f == "email":
-            field_instructions.append(
-                f'- "{f}": Primary contact email address. Return null if not found.'
-            )
-        elif f == "email2":
-            field_instructions.append(
-                f'- "{f}": A secondary or alternative contact email (different from the primary). '
-                f'Return null if not found.'
-            )
-        elif f == "linkedin":
-            field_instructions.append(
-                f'- "{f}": The company LinkedIn profile URL (linkedin.com/company/...). '
-                f'Return null if not found.'
-            )
-        elif f == "address":
-            field_instructions.append(
-                f'- "{f}": Full office/headquarters address as a single string. Return null if not found.'
-            )
-        elif f == "about":
-            field_instructions.append(
-                f'- "{f}": A 4-6 sentence plain-text company description covering what they do, '
-                f'industry, size, location, and specialities. Only from the source text.'
-            )
-        elif f == "culture":
-            field_instructions.append(
-                f'- "{f}": 2-4 sentences describing the company culture, values, or work environment '
-                f'based only on what is mentioned in the source text. Return null if nothing relevant found.'
-            )
-
-    fields_block = "\n".join(field_instructions)
-
     prompt = f"""
 You are extracting structured data from a company website for a CRM system.
 
 Company name: {name}
 Website: {website_url}
 
-== WEBSITE TEXT (your only source) ==
+== WEBSITE TEXT (your ONLY source) ==
 {website_text}
-== END OF SOURCE ==
+== END ==
 
-Extract the following fields and return a single JSON object.
-Use null for any field you cannot find in the source text.
-Do NOT invent or guess — only use information explicitly present above.
+Extract the following fields. Return a single JSON object.
+Return null for any field not explicitly found in the text above.
+Do NOT invent or infer — only use information present in the source.
 
-Fields to extract:
-{fields_block}
+{build_field_instructions(fields, industry_options)}
 
-Return ONLY a valid JSON object, no explanation, no markdown, no code fences.
-Example format: {{"about": "...", "industry": "Technology", "employee_count": 150, "phone": null}}
+Return ONLY valid JSON, no markdown, no explanation.
 """.strip()
 
     resp = openai_client.responses.create(
         model="gpt-4.1-mini",
         input=[
+            {"role": "system", "content": "You are a precise data extraction assistant. Return only valid JSON. Never invent data."},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    return parse_json_response(resp.output_text)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PASS 2 — Web search for remaining missing fields
+# ──────────────────────────────────────────────────────────────────────────────
+
+def ai_extract_from_web(
+    name: str,
+    website_url: str,
+    domain: str,
+    fields: list,
+    industry_options: list,
+) -> dict:
+    """
+    Uses OpenAI's web_search_preview tool to search for each missing field
+    with a targeted, company-specific query. All searches happen in a single
+    AI call — the model searches, reads results, and extracts a JSON object.
+
+    Crucially: the prompt instructs the model to verify that results are
+    genuinely about THIS company (matched by name + domain) before extracting.
+    """
+
+    # Build the search strategy description per field
+    search_hints = []
+    for f in fields:
+        query = WEB_SEARCH_QUERIES.get(f, "")
+        if query:
+            q = query.format(company_name=name, domain=domain)
+            search_hints.append(f'- For "{f}": search for: {q}')
+
+    if not search_hints:
+        return {}
+
+    search_block = "\n".join(search_hints)
+    field_instructions = build_field_instructions(fields, industry_options)
+
+    prompt = f"""
+You are a CRM data researcher. You need to find specific information about a company
+by searching the web. The company details are:
+
+  Company name: {name}
+  Website: {website_url}
+  Domain: {domain}
+
+IMPORTANT ACCURACY RULE:
+Before extracting any value, verify that the search result is genuinely about
+THIS company — it must match both the company name AND the domain ({domain}).
+If a result is about a different company with a similar name, ignore it entirely.
+If you are not confident a result refers to this exact company, return null for that field.
+
+Search strategy (use one search per field):
+{search_block}
+
+After searching, extract the following fields into a single JSON object.
+Return null for any field you could not find with high confidence.
+
+{field_instructions}
+
+Return ONLY valid JSON, no markdown, no explanation.
+""".strip()
+
+    resp = openai_client.responses.create(
+        model="gpt-4.1-mini",
+        tools=[{"type": "web_search_preview"}],
+        input=[
             {
                 "role": "system",
                 "content": (
-                    "You are a precise data extraction assistant. You return only valid JSON. "
-                    "You never invent data — if it is not in the source text, you return null for that field."
+                    "You are a precise CRM data researcher. You use web search to find factual "
+                    "company information. You only extract data you are confident belongs to the "
+                    "specific company identified by name AND domain. You return only valid JSON."
                 ),
             },
             {"role": "user", "content": prompt},
         ],
     )
+    return parse_json_response(resp.output_text)
 
-    raw = resp.output_text.strip()
-    # Strip any accidental markdown fences
-    raw = re.sub(r"^```[a-z]*\n?", "", raw)
-    raw = re.sub(r"\n?```$", "", raw)
 
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
-
+# ──────────────────────────────────────────────────────────────────────────────
+# Deal summary
+# ──────────────────────────────────────────────────────────────────────────────
 
 def ai_write_deal_summary(record: dict) -> str:
     title    = record.get("title", "")
@@ -336,27 +379,21 @@ def ai_write_deal_summary(record: dict) -> str:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Value formatters — converts AI output to the format Pipedrive expects
+# Value formatter
 # ──────────────────────────────────────────────────────────────────────────────
 
-def format_value_for_pipedrive(field_name: str, field_type: str, raw_value, industry_options: list[dict]):
-    """
-    Converts the AI-extracted value to the correct Pipedrive API format.
-    Returns None if the value should be skipped.
-    """
+def format_value_for_pipedrive(field_name: str, field_type: str, raw_value, industry_options: list):
     if raw_value is None:
         return None
 
     if field_type == "enum":
-        # Must send the option ID, not the label
         label = str(raw_value).strip()
         for opt in industry_options:
             if opt.get("label", "").lower() == label.lower():
                 return opt["id"]
-        return None  # label not found in options — skip
+        return None
 
     elif field_type == "phone":
-        # Pipedrive expects an array: [{"value": "...", "primary": true}]
         return [{"value": str(raw_value).strip(), "primary": True, "label": "work"}]
 
     elif field_type == "email":
@@ -364,14 +401,12 @@ def format_value_for_pipedrive(field_name: str, field_type: str, raw_value, indu
 
     elif field_type == "number":
         try:
-            # Strip any non-numeric characters just in case
             cleaned = re.sub(r"[^\d.]", "", str(raw_value))
             return float(cleaned) if "." in cleaned else int(cleaned)
         except (ValueError, TypeError):
             return None
 
     else:
-        # text, address, and everything else
         return str(raw_value).strip() if str(raw_value).strip() else None
 
 
@@ -478,8 +513,8 @@ async def api_populate(payload: dict):
         r = requests.get(f"{base}/deals/{record_id}", headers=headers, timeout=30)
         if r.status_code != 200:
             return JSONResponse({"error": "Failed to fetch deal", "body": r.text}, status_code=400)
-        data         = r.json().get("data", {})
-        target_key   = DEAL_FIELDS["deal_context"]["key"]
+        data       = r.json().get("data", {})
+        target_key = DEAL_FIELDS["deal_context"]["key"]
 
         if not is_empty(data.get(target_key)):
             return {"ok": True, "message": "Deal context already filled. Nothing to do."}
@@ -502,17 +537,16 @@ async def api_populate(payload: dict):
 
     data = r.json().get("data", {})
 
-    # Resolve which fields actually need filling (skip already-filled ones)
-    fields_to_fill = []
-    for field_name, field_info in ORG_FIELDS.items():
-        current = data.get(field_info["key"])
-        if is_empty(current):
-            fields_to_fill.append(field_name)
+    # Which fields need filling?
+    fields_to_fill = [
+        name for name, info in ORG_FIELDS.items()
+        if is_empty(data.get(info["key"]))
+    ]
 
     if not fields_to_fill:
         return {"ok": True, "message": "All fields already filled. Nothing to do."}
 
-    # Get the website URL
+    # Get website URL and domain
     website_url = data.get("website") or ""
     if isinstance(website_url, list):
         website_url = website_url[0].get("value", "") if website_url else ""
@@ -523,40 +557,71 @@ async def api_populate(payload: dict):
             status_code=400,
         )
 
-    # Scrape the website
-    website_text = fetch_website_text(website_url)
-    if not website_text or len(website_text) < 100:
-        return JSONResponse(
-            {"error": f"Could not read content from {website_url}. The site may be blocking requests or require JavaScript."},
-            status_code=400,
-        )
+    # Extract domain for anchoring web searches (e.g. "eaces.de")
+    domain_match = re.search(r"https?://(?:www\.)?([^/]+)", website_url)
+    domain = domain_match.group(1) if domain_match else website_url
 
-    # Fetch industry options if industry needs filling
+    # Fetch industry options if needed
     industry_options = []
     if "industry" in fields_to_fill:
         industry_options = get_industry_options(access_token)
 
-    # Ask AI to extract all fields in one call
+    org_name = data.get("name", "")
+
+    # ── PASS 1: extract from website ─────────────────────────────────────────
+    website_text = fetch_website_text(website_url)
+    if not website_text or len(website_text) < 100:
+        return JSONResponse(
+            {"error": f"Could not read content from {website_url}. The site may block requests or require JavaScript."},
+            status_code=400,
+        )
+
     try:
-        extracted = ai_extract_org_fields(
-            name=data.get("name", ""),
+        extracted = ai_extract_from_website(
+            name=org_name,
             website_url=website_url,
             website_text=website_text,
-            fields_to_fill=fields_to_fill,
+            fields=fields_to_fill,
             industry_options=industry_options,
         )
     except Exception as e:
-        return JSONResponse({"error": "AI extraction failed", "details": str(e)}, status_code=500)
+        return JSONResponse({"error": "AI extraction (website) failed", "details": str(e)}, status_code=500)
 
-    # Build the update payload, converting each value to Pipedrive format
+    # Which fields are still missing after pass 1?
+    still_missing = [
+        f for f in fields_to_fill
+        if extracted.get(f) is None and ORG_FIELDS[f].get("web_searchable")
+    ]
+
+    # ── PASS 2: web search for remaining fields ───────────────────────────────
+    web_extracted = {}
+    if still_missing:
+        try:
+            web_extracted = ai_extract_from_web(
+                name=org_name,
+                website_url=website_url,
+                domain=domain,
+                fields=still_missing,
+                industry_options=industry_options,
+            )
+        except Exception:
+            pass  # web search is best-effort — don't fail the whole request
+
+    # Merge: website data takes priority, web search fills the gaps
+    for f in still_missing:
+        if web_extracted.get(f) is not None and extracted.get(f) is None:
+            extracted[f] = web_extracted[f]
+
+    # ── Build Pipedrive update payload ────────────────────────────────────────
     update_payload = {}
-    filled = []
-    skipped = []
+    filled_website = []
+    filled_web     = []
+    not_found      = []
 
     for field_name in fields_to_fill:
         raw_value = extracted.get(field_name)
         if raw_value is None:
-            skipped.append(ORG_FIELDS[field_name]["label"])
+            not_found.append(ORG_FIELDS[field_name]["label"])
             continue
 
         formatted = format_value_for_pipedrive(
@@ -566,19 +631,20 @@ async def api_populate(payload: dict):
             industry_options,
         )
         if formatted is None:
-            skipped.append(ORG_FIELDS[field_name]["label"])
+            not_found.append(ORG_FIELDS[field_name]["label"])
             continue
 
         update_payload[ORG_FIELDS[field_name]["key"]] = formatted
-        filled.append(ORG_FIELDS[field_name]["label"])
+        label = ORG_FIELDS[field_name]["label"]
+        if field_name in still_missing and web_extracted.get(field_name) is not None:
+            filled_web.append(label)
+        else:
+            filled_website.append(label)
 
     if not update_payload:
-        return {
-            "ok": True,
-            "message": f"No data found on the website for: {', '.join(skipped)}.",
-        }
+        return {"ok": True, "message": f"No data found for: {', '.join(not_found)}."}
 
-    # Write back to Pipedrive
+    # Write to Pipedrive
     u = requests.put(
         f"{base}/organizations/{record_id}",
         json=update_payload,
@@ -588,11 +654,23 @@ async def api_populate(payload: dict):
     if u.status_code != 200:
         return JSONResponse({"error": "Failed to update organisation", "body": u.text}, status_code=400)
 
-    msg = f"Filled: {', '.join(filled)}."
-    if skipped:
-        msg += f" Not found on website: {', '.join(skipped)}."
+    # Build a clear, informative message
+    parts = []
+    if filled_website:
+        parts.append(f"From website: {', '.join(filled_website)}")
+    if filled_web:
+        parts.append(f"From web search: {', '.join(filled_web)}")
+    if not_found:
+        parts.append(f"Not found: {', '.join(not_found)}")
 
-    return {"ok": True, "message": msg}
+    total = len(filled_website) + len(filled_web)
+    return {
+        "ok": True,
+        "message": f"{total} field{'s' if total != 1 else ''} populated. " + ". ".join(parts) + ".",
+        "filled_website": filled_website,
+        "filled_web":     filled_web,
+        "not_found":      not_found,
+    }
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")

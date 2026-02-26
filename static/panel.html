@@ -4,72 +4,292 @@
     <meta charset="utf-8" />
     <title>DataFielder</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-
     <script src="https://cdn.jsdelivr.net/npm/@pipedrive/app-extensions-sdk@0/dist/index.umd.js"></script>
-
     <style>
-      body { font-family: system-ui, Arial; padding: 12px; }
-      button { padding: 10px 12px; cursor: pointer; width: 100%; }
-      .muted { color: #666; font-size: 12px; margin-top: 8px; }
-      .status { margin-top: 10px; padding: 10px; background: #f4f4f4; border-radius: 8px; font-size: 13px; white-space: pre-wrap; }
+      :root {
+        --pd-green:       #1db954;
+        --pd-green-dark:  #17a349;
+        --pd-green-light: #e8f8ee;
+        --pd-blue:        #3b82f6;
+        --pd-blue-light:  #eff6ff;
+        --pd-text:        #1a1f36;
+        --pd-muted:       #6b7280;
+        --pd-border:      #e5e7eb;
+        --pd-bg:          #ffffff;
+        --pd-bg-subtle:   #f9fafb;
+        --pd-red:         #e4423f;
+        --pd-red-light:   #fef2f2;
+        --pd-yellow:      #f59e0b;
+        --pd-yellow-light:#fffbeb;
+        --radius:         6px;
+        --font:           -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        font-family: var(--font);
+        font-size: 13px;
+        color: var(--pd-text);
+        background: var(--pd-bg);
+        padding: 12px;
+        line-height: 1.5;
+      }
+
+      /* Header */
+      .header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--pd-border);
+      }
+      .logo {
+        width: 28px; height: 28px;
+        background: var(--pd-green);
+        border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+      }
+      .logo svg { width: 16px; height: 16px; fill: white; }
+      .header-text h1 { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+      .header-text p  { font-size: 11px; color: var(--pd-muted); margin-top: 1px; }
+
+      /* Button */
+      .btn {
+        display: flex; align-items: center; justify-content: center; gap: 6px;
+        width: 100%; padding: 8px 14px;
+        border: none; border-radius: var(--radius);
+        font-family: var(--font); font-size: 13px; font-weight: 500;
+        cursor: pointer;
+        transition: background 0.15s, transform 0.1s;
+        -webkit-font-smoothing: antialiased;
+      }
+      .btn-primary { background: var(--pd-green); color: white; }
+      .btn-primary:hover:not(:disabled) { background: var(--pd-green-dark); }
+      .btn-primary:active:not(:disabled) { transform: scale(0.98); }
+      .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+      .btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+      .spinner {
+        width: 14px; height: 14px;
+        border: 2px solid rgba(255,255,255,0.35);
+        border-top-color: white;
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      .hint { font-size: 11px; color: var(--pd-muted); margin-top: 6px; text-align: center; }
+
+      /* Status card */
+      .status-card {
+        margin-top: 10px;
+        padding: 9px 11px;
+        border-radius: var(--radius);
+        font-size: 12px; line-height: 1.5;
+        display: none;
+        animation: fadeIn 0.2s ease;
+      }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(2px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .status-card.visible { display: block; }
+      .status-card.success  { background: var(--pd-green-light); color: #0d6b2e; border: 1px solid #a7e6be; }
+      .status-card.error    { background: var(--pd-red-light);   color: #991b1b; border: 1px solid #fca5a5; }
+      .status-card.warning  { background: var(--pd-yellow-light);color: #92400e; border: 1px solid #fcd34d; }
+
+      .status-header { display: flex; align-items: flex-start; gap: 6px; }
+      .status-icon   { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; }
+      .status-body   { flex: 1; }
+      .status-title  { font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+
+      /* Source groups */
+      .source-group { margin-top: 6px; }
+      .source-label {
+        font-size: 10px; font-weight: 600; text-transform: uppercase;
+        letter-spacing: 0.05em; opacity: 0.65; margin-bottom: 3px;
+      }
+      .tag-row { display: flex; flex-wrap: wrap; gap: 3px; }
+      .tag {
+        display: inline-flex; align-items: center; gap: 3px;
+        padding: 2px 7px;
+        border-radius: 20px;
+        font-size: 10px; font-weight: 500;
+      }
+      .tag svg { width: 9px; height: 9px; }
+      .tag-green { background: white; border: 1px solid #a7e6be; color: #0d6b2e; }
+      .tag-blue  { background: var(--pd-blue-light); border: 1px solid #bfdbfe; color: #1e40af; }
+      .tag-grey  { background: var(--pd-bg-subtle); border: 1px solid var(--pd-border); color: var(--pd-muted); }
+
+      /* Person notice */
+      .notice {
+        display: flex; align-items: flex-start; gap: 8px;
+        padding: 9px 11px;
+        background: var(--pd-bg-subtle); border: 1px solid var(--pd-border);
+        border-radius: var(--radius); font-size: 12px; color: var(--pd-muted);
+        margin-top: 8px;
+      }
+      .notice svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; opacity: 0.5; }
     </style>
   </head>
 
   <body>
-    <h3>DataFielder</h3>
+    <div class="header">
+      <div class="logo">
+        <svg viewBox="0 0 24 24"><path d="M12 2L13.5 9L20 12L13.5 15L12 22L10.5 15L4 12L10.5 9Z"/></svg>
+      </div>
+      <div class="header-text">
+        <h1>DataFielder</h1>
+        <p>AI-powered field enrichment</p>
+      </div>
+    </div>
 
-    <button id="populate">Populate missing fields</button>
-    <div class="muted">Fills only empty fields for this record.</div>
+    <button class="btn btn-primary" id="btn-populate">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="16"/>
+        <line x1="8" y1="12" x2="16" y2="12"/>
+      </svg>
+      Populate missing fields
+    </button>
+    <p class="hint">Only empty fields will be filled</p>
 
-    <div id="status" class="status">Ready.</div>
+    <div class="status-card" id="status-card">
+      <div class="status-header">
+        <svg class="status-icon" id="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></svg>
+        <div class="status-body">
+          <div class="status-title" id="status-title"></div>
+          <div id="status-groups"></div>
+        </div>
+      </div>
+    </div>
 
     <script>
-      (async () => {
-        const sdk = await new AppExtensionsSDK().initialize();
-        const statusEl = document.getElementById("status");
+    (async () => {
+      const sdk = await new AppExtensionsSDK().initialize();
+      try { await sdk.execute("resize", { height: 200 }); } catch(e) {}
 
-        // Make panel height nice
-        try { await sdk.execute("resize", { height: 220 }); } catch (e) {}
+      const btn        = document.getElementById("btn-populate");
+      const card       = document.getElementById("status-card");
+      const iconEl     = document.getElementById("status-icon");
+      const titleEl    = document.getElementById("status-title");
+      const groupsEl   = document.getElementById("status-groups");
 
-        function setStatus(msg) { statusEl.textContent = msg; }
+      const ICONS = {
+        success: `<polyline points="20 6 9 17 4 12"/>`,
+        error:   `<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/>`,
+        warning: `<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/>`,
+      };
 
-        // Context from URL
-        const params = Object.fromEntries(new URLSearchParams(location.search));
-        const resource = params.resource;      // person / deal / organization
-        const id = params.selectedIds || params.id; // usually selectedIds contains the record id
+      function makeTags(fields, cls) {
+        const checkmark = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+        const dash      = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
+        const icon      = cls === "tag-grey" ? dash : checkmark;
+        return fields.map(f => `<span class="tag ${cls}">${icon}${f}</span>`).join("");
+      }
 
-        document.getElementById("populate").addEventListener("click", async () => {
-          if (!resource || !id) {
-            setStatus("Error: missing context (resource or id). Open this panel from a record page.");
+      function showStatus(type, title, groups) {
+        card.className = `status-card visible ${type}`;
+        iconEl.innerHTML = ICONS[type] || ICONS.warning;
+        titleEl.textContent = title;
+        groupsEl.innerHTML = "";
+
+        groups.forEach(({ label, fields, cls }) => {
+          if (!fields || fields.length === 0) return;
+          const div = document.createElement("div");
+          div.className = "source-group";
+          div.innerHTML = `<div class="source-label">${label}</div><div class="tag-row">${makeTags(fields, cls)}</div>`;
+          groupsEl.appendChild(div);
+        });
+
+        // Resize to fit content
+        const estimated = 200 + groups.reduce((sum, g) => sum + (g.fields?.length ? 28 : 0), 0);
+        try { sdk.execute("resize", { height: Math.min(estimated, 380) }); } catch(e) {}
+      }
+
+      function setLoading(loading) {
+        btn.disabled = loading;
+        btn.innerHTML = loading
+          ? `<div class="spinner"></div> Searching…`
+          : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg> Populate missing fields`;
+      }
+
+      const params   = Object.fromEntries(new URLSearchParams(location.search));
+      const resource = params.resource;
+      const id       = params.selectedIds || params.id;
+
+      if (resource === "person") {
+        const notice = document.createElement("div");
+        notice.className = "notice";
+        notice.innerHTML = `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="16" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <span>Person enrichment is not available. Open an <strong>Organisation</strong> or <strong>Deal</strong> record.</span>
+        `;
+        document.body.appendChild(notice);
+        btn.disabled = true;
+        try { sdk.execute("resize", { height: 240 }); } catch(e) {}
+      }
+
+      btn.addEventListener("click", async () => {
+        if (!resource || !id) {
+          showStatus("error", "Missing context", [{ label: "Details", fields: ["Open this panel from a record page"], cls: "tag-grey" }]);
+          return;
+        }
+
+        setLoading(true);
+
+        try {
+          const res  = await fetch("/api/populate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ resource, id, companyId: params.companyId, userId: params.userId }),
+          });
+
+          const data = await res.json();
+
+          if (!res.ok) {
+            showStatus("error", "Could not populate fields", [
+              { label: "Error", fields: [data.error || "Something went wrong"], cls: "tag-grey" },
+            ]);
             return;
           }
 
-          setStatus("Working…");
+          const msg = data.message || "";
 
-          try {
-            const res = await fetch("/api/populate", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                resource,
-                id,
-                companyId: params.companyId,
-                userId: params.userId
-              })
-            });
-
-            const data = await res.json();
-            if (!res.ok) {
-              setStatus("Error:\n" + JSON.stringify(data, null, 2));
-              return;
-            }
-
-            setStatus(data.message || "Done.");
-          } catch (err) {
-            setStatus("Network error: " + String(err));
+          if (msg.includes("already filled")) {
+            showStatus("warning", "Already up to date", [
+              { label: "Status", fields: ["All fields already have values"], cls: "tag-grey" },
+            ]);
+            return;
           }
-        });
-      })();
+
+          const fromWebsite = data.filled_website || [];
+          const fromWeb     = data.filled_web     || [];
+          const notFound    = data.not_found       || [];
+          const total       = fromWebsite.length + fromWeb.length;
+
+          showStatus("success", `${total} field${total !== 1 ? "s" : ""} populated`, [
+            { label: "✦ From website",    fields: fromWebsite, cls: "tag-green" },
+            { label: "⌕ From web search", fields: fromWeb,     cls: "tag-blue"  },
+            { label: "Not found",         fields: notFound,    cls: "tag-grey"  },
+          ]);
+
+        } catch(err) {
+          showStatus("error", "Network error", [
+            { label: "Details", fields: [String(err)], cls: "tag-grey" },
+          ]);
+        } finally {
+          setLoading(false);
+        }
+      });
+    })();
     </script>
   </body>
 </html>
