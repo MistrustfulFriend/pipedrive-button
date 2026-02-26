@@ -357,30 +357,50 @@ Return ONLY valid JSON, no markdown, no explanation.
 # Deal summary
 # ──────────────────────────────────────────────────────────────────────────────
 
-def fetch_deal_notes(deal_id: str, headers: dict) -> list:
-    """Fetch up to 20 most recent notes for a deal, newest first."""
+def fetch_deal_notes(deal_id: str, headers: dict, date_from: str = "", date_to: str = "") -> list:
+    """Fetch up to 50 most recent notes for a deal, newest first. Optionally filter by date range."""
     r = requests.get(
         "https://api.pipedrive.com/v1/notes",
-        params={"deal_id": deal_id, "limit": 20, "sort": "add_time DESC"},
+        params={"deal_id": deal_id, "limit": 50, "sort": "add_time DESC"},
         headers=headers,
         timeout=30,
     )
     if r.status_code != 200:
         return []
-    return r.json().get("data") or []
+    notes = r.json().get("data") or []
+    return _filter_by_date(notes, "add_time", date_from, date_to)
 
 
-def fetch_deal_activities(deal_id: str, headers: dict) -> list:
-    """Fetch up to 20 most recent activities for a deal using v2 API."""
+def _filter_by_date(items: list, date_key: str, date_from: str, date_to: str) -> list:
+    """Filter a list of dicts by a date field. Dates are YYYY-MM-DD strings."""
+    if not date_from and not date_to:
+        return items
+    result = []
+    for item in items:
+        raw = (item.get(date_key) or "")[:10]
+        if not raw:
+            result.append(item)
+            continue
+        if date_from and raw < date_from:
+            continue
+        if date_to and raw > date_to:
+            continue
+        result.append(item)
+    return result
+
+
+def fetch_deal_activities(deal_id: str, headers: dict, date_from: str = "", date_to: str = "") -> list:
+    """Fetch up to 50 most recent activities for a deal using v2 API. Optionally filter by date range."""
     r = requests.get(
         "https://api.pipedrive.com/api/v2/activities",
-        params={"deal_id": deal_id, "limit": 20, "sort_by": "add_time", "sort_direction": "desc"},
+        params={"deal_id": deal_id, "limit": 50, "sort_by": "add_time", "sort_direction": "desc"},
         headers=headers,
         timeout=30,
     )
     if r.status_code != 200:
         return []
-    return r.json().get("data") or []
+    activities = r.json().get("data") or []
+    return _filter_by_date(activities, "due_date", date_from, date_to)
 
 
 def clean_html(text: str) -> str:
@@ -418,12 +438,43 @@ def format_activities_block(activities: list) -> str:
 
 
 def ai_write_deal_summary(record: dict, notes: list, activities: list) -> str:
-    title    = record.get("title", "")
-    value    = record.get("value", "")
-    currency = record.get("currency", "")
-    stage    = record.get("stage_id", "")
-    org      = (record.get("org_id") or {}).get("name", "") if isinstance(record.get("org_id"), dict) else record.get("org_id") or ""
-    person   = (record.get("person_id") or {}).get("name", "") if isinstance(record.get("person_id"), dict) else record.get("person_id") or ""
+    title       = record.get("title", "")
+    value       = record.get("value", "")
+    currency    = record.get("currency", "")
+    probability = record.get("probability", "")
+    close_date  = record.get("close_time") or record.get("expected_close_date") or ""
+    if close_date:
+        close_date = str(close_date)[:10]
+    status      = record.get("status", "")
+    pipeline    = (record.get("pipeline_id") or {}).get("name", "") if isinstance(record.get("pipeline_id"), dict) else ""
+    stage       = (record.get("stage_id") or {}).get("name", "") if isinstance(record.get("stage_id"), dict) else str(record.get("stage_id") or "")
+    owner       = (record.get("owner_id") or {}).get("name", "") if isinstance(record.get("owner_id"), dict) else ""
+    org         = (record.get("org_id") or {}).get("name", "") if isinstance(record.get("org_id"), dict) else record.get("org_id") or ""
+    person      = (record.get("person_id") or {}).get("name", "") if isinstance(record.get("person_id"), dict) else record.get("person_id") or ""
+
+    # Build deal details block—only include lines where a value exists
+    detail_lines = [f"Title:        {title}"]
+    if value:
+        val_str = f"{value:,}" if isinstance(value, (int, float)) else str(value)
+        detail_lines.append(f"Value:        {val_str} {currency}".strip())
+    if probability not in (None, "", "null"):
+        detail_lines.append(f"Probability:  {probability}%")
+    if close_date:
+        detail_lines.append(f"Close date:   {close_date}")
+    if status:
+        detail_lines.append(f"Status:       {status}")
+    if pipeline:
+        detail_lines.append(f"Pipeline:     {pipeline}")
+    if stage:
+        detail_lines.append(f"Stage:        {stage}")
+    if owner:
+        detail_lines.append(f"Owner:        {owner}")
+    if org:
+        detail_lines.append(f"Organisation: {org}")
+    if person:
+        detail_lines.append(f"Contact:      {person}")
+
+    deal_details = "\n".join(detail_lines)
 
     notes_block      = format_notes_block(notes)
     activities_block = format_activities_block(activities)
@@ -434,35 +485,52 @@ def ai_write_deal_summary(record: dict, notes: list, activities: list) -> str:
         parts = [p for p in [notes_block, activities_block] if p]
         history_section = "\n\n" + "\n\n".join(parts)
 
+    # Build mandatory-facts rule so the model is explicitly told what to include
+    mandatory_parts = []
+    if value:
+        mandatory_parts.append("deal value")
+    if probability not in (None, "", "null"):
+        mandatory_parts.append("win probability")
+    if close_date:
+        mandatory_parts.append("expected close date")
+    if stage:
+        mandatory_parts.append("current stage")
+    mandatory_str = ", ".join(mandatory_parts)
+    mandatory_rule = (
+        f"- Your summary MUST mention the following facts (if present): {mandatory_str}. "
+        "Never omit these \xe2\x80\x94 they are the most important numbers for the sales team."
+    ) if mandatory_parts else ""
+
     if has_history:
         instruction = (
             "Write a 4-7 sentence deal context summary for a sales team. "
-            "Focus on: what has happened so far, key discussion points or concerns raised, "
-            "current status, and what the logical next step should be. "
-            "Be specific — reference actual dates, topics, and outcomes from the history. "
+            "Start with a one-sentence snapshot that includes the deal value, win probability, "
+            "current stage, and expected close date. "
+            "Then cover: what has happened so far, key discussion points or concerns raised, "
+            "current status, and the logical next step. "
+            "Be specific \xe2\x80\x94 reference actual dates, topics, and outcomes from the history. "
             "Plain text only, no bullet points."
         )
     else:
         instruction = (
             "Write a 3-5 sentence deal context note useful before a first sales call. "
-            "Plain text only."
+            "Start with a one-sentence snapshot that includes the deal value, win probability, "
+            "current stage, and expected close date. "
+            "Plain text only, no bullet points."
         )
 
     prompt = f"""
 {instruction}
 
 == DEAL DETAILS ==
-Title:    {title}
-Value:    {value} {currency}
-Stage:    {stage}
-Org:      {org}
-Contact:  {person}{history_section}
+{deal_details}{history_section}
 
 STRICT RULES:
 - Use only information present above. Do not invent facts.
-- Do not repeat the deal title or field labels verbatim.
+- Do not repeat field labels verbatim (e.g. don't write "Value: 50,000 EUR" \xe2\x80\x94 write "a \xe2\x82\xac50,000 deal").
 - Do not say "according to the notes" or reference the data structure.
 - Write as a natural, useful briefing paragraph.
+{mandatory_rule}
 """.strip()
 
     resp = openai_client.responses.create(
@@ -472,7 +540,8 @@ STRICT RULES:
                 "role": "system",
                 "content": (
                     "You are a precise CRM assistant writing deal briefings for sales reps. "
-                    "You synthesize notes and activity history into a clear, actionable summary. "
+                    "You synthesize deal data, notes and activity history into a clear, actionable summary. "
+                    "You ALWAYS include the deal value, win probability, stage, and close date when they are available. "
                     "You never invent facts."
                 ),
             },
@@ -623,9 +692,11 @@ async def api_populate(payload: dict):
         if not is_empty(data.get(target_key)):
             return {"ok": True, "message": "Deal context already filled. Nothing to do."}
 
-        # Fetch notes and activities to enrich the summary
-        notes      = fetch_deal_notes(record_id, headers)
-        activities = fetch_deal_activities(record_id, headers)
+        # Fetch notes and activities to enrich the summary (optionally date-filtered)
+        date_from  = str(payload.get("date_from") or "")[:10]
+        date_to    = str(payload.get("date_to")   or "")[:10]
+        notes      = fetch_deal_notes(record_id, headers, date_from, date_to)
+        activities = fetch_deal_activities(record_id, headers, date_from, date_to)
 
         try:
             ai_text = ai_write_deal_summary(data, notes, activities)
