@@ -3,13 +3,57 @@ import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+import sqlite3
+import time
 
 app = FastAPI()
+db_init()
 
 BASE_URL = os.getenv("BASE_URL", "https://pipedrive-button.onrender.com")
 PIPEDRIVE_CLIENT_ID = os.getenv("PIPEDRIVE_CLIENT_ID", "")
 REDIRECT_URI = f"{BASE_URL}/oauth/callback"
 
+FIELD_KEYS = {
+    "deal": {"deal_context": "e637e09d69529de9a304c5a82a7a16eccee68c83"},          # put API key here
+    "person": {"background": "ea9b03ac0608816c4dbe05a2ce5109ff8276aab8"},          # put API key here
+    "organization": {"about": "fd1f632d86b97eb74f18daadc8ea6d0afaf0f6a2"},         # put API key here
+}
+
+DB_PATH = "tokens.db"
+
+def db_init():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tokens (
+            company_id TEXT PRIMARY KEY,
+            access_token TEXT NOT NULL,
+            refresh_token TEXT NOT NULL,
+            expires_at INTEGER NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def save_tokens(company_id: str, access_token: str, refresh_token: str, expires_in: int):
+    expires_at = int(time.time()) + int(expires_in) - 60  # 60s safety margin
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT OR REPLACE INTO tokens(company_id, access_token, refresh_token, expires_at) VALUES (?, ?, ?, ?)",
+        (company_id, access_token, refresh_token, expires_at),
+    )
+    conn.commit()
+    conn.close()
+
+def load_tokens(company_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT access_token, refresh_token, expires_at FROM tokens WHERE company_id=?",
+        (company_id,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"access_token": row[0], "refresh_token": row[1], "expires_at": row[2]}
 
 # ---------------------------
 # Panel (embedded in Pipedrive)
@@ -73,6 +117,21 @@ def oauth_callback(request: Request):
 
     tokens = r.json()
 
+    access_token = tokens["access_token"]
+    refresh_token = tokens["refresh_token"]
+    expires_in = tokens.get("expires_in", 3600)
+
+    # Get company_id from Pipedrive using the access token
+    me = requests.get(
+        "https://api.pipedrive.com/v1/users/me",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=30,
+    )
+    me.raise_for_status()
+    company_id = str(me.json()["data"]["company_id"])
+
+    save_tokens(company_id, access_token, refresh_token, int(expires_in))
+
     # Confirm success (do NOT display tokens)
     return {
         "ok": True,
@@ -84,19 +143,57 @@ def oauth_callback(request: Request):
 
 @app.post("/api/populate")
 async def api_populate(payload: dict):
-    # This is just wiring for now.
-    # Next steps will:
-    # 1) load stored OAuth token for companyId/userId
-    # 2) fetch the record from Pipedrive
-    # 3) check configured custom fields for emptiness
-    # 4) call AI and update the empty fields
-    resource = payload.get("resource")
-    record_id = payload.get("id")
+    resource = payload.get("resource")           # "deal" / "person" / "organization"
+    record_id = str(payload.get("id"))
+    company_id = str(payload.get("companyId"))
 
-    return {
-        "ok": True,
-        "message": f"Wired! Next: fetch {resource} #{record_id}, detect empty fields, fill with AI, update Pipedrive."
-    }
+    if resource not in ("deal", "person", "organization"):
+        return JSONResponse({"error": "Unsupported resource"}, status_code=400)
+
+    tokens = load_tokens(company_id)
+    if not tokens:
+        return JSONResponse({"error": "Not connected. Run /oauth/start once."}, status_code=401)
+
+    access_token = tokens["access_token"]
+
+    # Pipedrive endpoints
+    base = "https://api.pipedrive.com/v1"
+    if resource == "deal":
+        get_url = f"{base}/deals/{record_id}"
+        put_url = f"{base}/deals/{record_id}"
+        field_key = FIELD_KEYS["deal"]["deal_context"]
+    elif resource == "person":
+        get_url = f"{base}/persons/{record_id}"
+        put_url = f"{base}/persons/{record_id}"
+        field_key = FIELD_KEYS["person"]["background"]
+    else:
+        get_url = f"{base}/organizations/{record_id}"
+        put_url = f"{base}/organizations/{record_id}"
+        field_key = FIELD_KEYS["organization"]["about"]
+
+    if not field_key:
+        return JSONResponse({"error": "Field API key not configured yet."}, status_code=500)
+
+    # Fetch record
+    r = requests.get(get_url, headers={"Authorization": f"Bearer {access_token}"}, timeout=30)
+    if r.status_code != 200:
+        return JSONResponse({"error": "Failed to fetch record", "body": r.text}, status_code=400)
+
+    data = r.json().get("data", {})
+    current_value = data.get(field_key)
+
+    # Only fill if empty
+    if current_value not in (None, "", []):
+        return {"ok": True, "message": "Field already filled. Nothing to do."}
+
+    dummy_value = "Filled by DataFielder (test)"
+    update = {field_key: dummy_value}
+
+    u = requests.put(put_url, json=update, headers={"Authorization": f"Bearer {access_token}"}, timeout=30)
+    if u.status_code != 200:
+        return JSONResponse({"error": "Failed to update record", "body": u.text}, status_code=400)
+
+    return {"ok": True, "message": "Done. Filled 1 field."}
 
 # Static files (panel.html and any JS/CSS if you add later)
 app.mount("/static", StaticFiles(directory="static"), name="static")
