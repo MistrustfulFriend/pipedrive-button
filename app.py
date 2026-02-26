@@ -357,7 +357,67 @@ Return ONLY valid JSON, no markdown, no explanation.
 # Deal summary
 # ──────────────────────────────────────────────────────────────────────────────
 
-def ai_write_deal_summary(record: dict) -> str:
+def fetch_deal_notes(deal_id: str, headers: dict) -> list:
+    """Fetch up to 20 most recent notes for a deal, newest first."""
+    r = requests.get(
+        "https://api.pipedrive.com/v1/notes",
+        params={"deal_id": deal_id, "limit": 20, "sort": "add_time DESC"},
+        headers=headers,
+        timeout=30,
+    )
+    if r.status_code != 200:
+        return []
+    return r.json().get("data") or []
+
+
+def fetch_deal_activities(deal_id: str, headers: dict) -> list:
+    """Fetch up to 20 most recent activities for a deal using v2 API."""
+    r = requests.get(
+        "https://api.pipedrive.com/api/v2/activities",
+        params={"deal_id": deal_id, "limit": 20, "sort_by": "add_time", "sort_direction": "desc"},
+        headers=headers,
+        timeout=30,
+    )
+    if r.status_code != 200:
+        return []
+    return r.json().get("data") or []
+
+
+def clean_html(text: str) -> str:
+    """Strip HTML tags from note content."""
+    return re.sub(r"<[^>]+>", " ", text or "").strip()
+
+
+def format_notes_block(notes: list) -> str:
+    if not notes:
+        return ""
+    lines = ["== NOTES =="]
+    for n in notes:
+        date    = (n.get("add_time") or "")[:10]
+        content = clean_html(n.get("content", "")).strip()
+        if content:
+            lines.append(f"[{date}] {content}")
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def format_activities_block(activities: list) -> str:
+    if not activities:
+        return ""
+    lines = ["== ACTIVITIES =="]
+    for a in activities:
+        date    = (a.get("due_date") or a.get("add_time") or "")[:10]
+        atype   = a.get("type", "activity")
+        subject = a.get("subject") or ""
+        done    = "\u2713" if a.get("done") else "\u25cb"
+        note_txt = clean_html(a.get("note", "")).strip()
+        entry   = f"[{date}] {done} {atype.upper()}: {subject}"
+        if note_txt and note_txt != subject:
+            entry += f" \u2014 {note_txt[:300]}"
+        lines.append(entry)
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def ai_write_deal_summary(record: dict, notes: list, activities: list) -> str:
     title    = record.get("title", "")
     value    = record.get("value", "")
     currency = record.get("currency", "")
@@ -365,14 +425,58 @@ def ai_write_deal_summary(record: dict) -> str:
     org      = (record.get("org_id") or {}).get("name", "") if isinstance(record.get("org_id"), dict) else record.get("org_id") or ""
     person   = (record.get("person_id") or {}).get("name", "") if isinstance(record.get("person_id"), dict) else record.get("person_id") or ""
 
+    notes_block      = format_notes_block(notes)
+    activities_block = format_activities_block(activities)
+    has_history      = bool(notes_block or activities_block)
+
+    history_section = ""
+    if has_history:
+        parts = [p for p in [notes_block, activities_block] if p]
+        history_section = "\n\n" + "\n\n".join(parts)
+
+    if has_history:
+        instruction = (
+            "Write a 4-7 sentence deal context summary for a sales team. "
+            "Focus on: what has happened so far, key discussion points or concerns raised, "
+            "current status, and what the logical next step should be. "
+            "Be specific — reference actual dates, topics, and outcomes from the history. "
+            "Plain text only, no bullet points."
+        )
+    else:
+        instruction = (
+            "Write a 3-5 sentence deal context note useful before a first sales call. "
+            "Plain text only."
+        )
+
+    prompt = f"""
+{instruction}
+
+== DEAL DETAILS ==
+Title:    {title}
+Value:    {value} {currency}
+Stage:    {stage}
+Org:      {org}
+Contact:  {person}{history_section}
+
+STRICT RULES:
+- Use only information present above. Do not invent facts.
+- Do not repeat the deal title or field labels verbatim.
+- Do not say "according to the notes" or reference the data structure.
+- Write as a natural, useful briefing paragraph.
+""".strip()
+
     resp = openai_client.responses.create(
         model="gpt-4.1-mini",
         input=[
-            {"role": "system", "content": "You write short factual CRM deal context notes. Never invent anything."},
-            {"role": "user", "content": (
-                f"Write a 3-5 sentence deal context note useful before a sales call. Plain text only.\n\n"
-                f"Deal: {title}\nValue: {value} {currency}\nStage: {stage}\nOrg: {org}\nContact: {person}"
-            )},
+            {
+                "role": "system",
+                "content": (
+                    "You are a precise CRM assistant writing deal briefings for sales reps. "
+                    "You synthesize notes and activity history into a clear, actionable summary. "
+                    "You never invent facts."
+                ),
+            },
+            {"role": "user", "content": prompt},
         ],
     )
     return resp.output_text.strip()
@@ -519,8 +623,12 @@ async def api_populate(payload: dict):
         if not is_empty(data.get(target_key)):
             return {"ok": True, "message": "Deal context already filled. Nothing to do."}
 
+        # Fetch notes and activities to enrich the summary
+        notes      = fetch_deal_notes(record_id, headers)
+        activities = fetch_deal_activities(record_id, headers)
+
         try:
-            ai_text = ai_write_deal_summary(data)
+            ai_text = ai_write_deal_summary(data, notes, activities)
         except Exception as e:
             return JSONResponse({"error": "AI generation failed", "details": str(e)}, status_code=500)
 
@@ -528,7 +636,9 @@ async def api_populate(payload: dict):
         if u.status_code != 200:
             return JSONResponse({"error": "Failed to update deal", "body": u.text}, status_code=400)
 
-        return {"ok": True, "message": "Done. Deal context populated."}
+        has_history = bool(notes or activities)
+        source_note = " (based on notes & activity history)" if has_history else " (no history found — used deal details only)"
+        return {"ok": True, "message": f"Done. Deal context populated{source_note}."}
 
     # ── Organisation ─────────────────────────────────────────────────────────
     r = requests.get(f"{base}/organizations/{record_id}", headers=headers, timeout=30)
