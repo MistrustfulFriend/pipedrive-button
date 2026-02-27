@@ -109,7 +109,7 @@
       .date-range-title svg { width: 12px; height: 12px; stroke: var(--pd-text-muted); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; flex-shrink: 0; }
       .date-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
       .date-field label { display: block; font-size: 10px; font-weight: 500; color: var(--pd-text-muted); margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
-      .date-field input[type="date"] { width: 100%; padding: 6px 8px; font-family: var(--font); font-size: 12px; color: var(--pd-text); background: var(--pd-bg); border: 1px solid var(--pd-border-strong); border-radius: var(--radius); outline: none; transition: border-color 0.15s, box-shadow 0.15s; }
+      .date-field input[type="date"] { width: 100%; padding: 6px 8px; font-family: var(--font); font-size: 12px; color: var(--pd-text); background: var(--pd-bg); border: 1px solid var(--pd-border-strong); border-radius: var(--radius); outline: none; transition: border-color 0.15s, box-shadow 0.15s;}
       .date-field input[type="date"]:focus { border-color: var(--pd-green); box-shadow: 0 0 0 2px var(--pd-green-alpha); }
       .date-hint { font-size: 10px; color: var(--pd-text-muted); margin-top: 7px; line-height: 1.4; }
       .date-clear { background: none; border: none; font-family: var(--font); font-size: 10px; color: var(--pd-text-muted); cursor: pointer; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
@@ -169,6 +169,66 @@
       /* Notice */
       .notice { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; padding: 10px 12px; background: var(--pd-bg-subtle); border: 1px solid var(--pd-border); border-radius: var(--radius-lg); font-size: 12px; color: var(--pd-text-secondary); line-height: 1.5; }
       .notice-icon { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; stroke: var(--pd-text-muted); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; }
+
+      /* ── Connect screen ──────────────────────────────────── */
+      .connect-screen {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        padding: 8px 4px 4px;
+        animation: slideIn 0.2s ease;
+      }
+      .connect-screen.visible { display: flex; }
+
+      .connect-icon {
+        width: 44px; height: 44px;
+        background: var(--pd-bg-subtle);
+        border: 1px solid var(--pd-border);
+        border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        margin-bottom: 12px;
+      }
+      .connect-icon svg {
+        width: 22px; height: 22px;
+        stroke: var(--pd-text-muted); fill: none;
+        stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round;
+      }
+      .connect-title {
+        font-size: 13px; font-weight: 600;
+        color: var(--pd-text); margin-bottom: 5px;
+        letter-spacing: -0.01em;
+      }
+      .connect-desc {
+        font-size: 12px; color: var(--pd-text-secondary);
+        line-height: 1.5; margin-bottom: 16px; max-width: 240px;
+      }
+      .btn-connect {
+        display: inline-flex; align-items: center; gap: 7px;
+        padding: 9px 20px;
+        background: var(--pd-green); color: #fff;
+        border: none; border-radius: var(--radius);
+        font-family: var(--font); font-size: 13px; font-weight: 500;
+        cursor: pointer; line-height: 1; letter-spacing: -0.01em;
+        box-shadow: 0 1px 2px rgba(29,185,84,0.25), 0 0 0 1px rgba(29,185,84,0.20) inset;
+        transition: background 0.15s, transform 0.1s;
+        text-decoration: none;
+      }
+      .btn-connect:hover { background: var(--pd-green-dark); }
+      .btn-connect:active { transform: scale(0.985); }
+      .btn-connect svg {
+        width: 14px; height: 14px; flex-shrink: 0;
+        stroke: currentColor; fill: none;
+        stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round;
+      }
+      .connect-note {
+        font-size: 10px; color: var(--pd-text-muted);
+        margin-top: 10px; line-height: 1.5;
+      }
+
+      /* Dim main content when not connected */
+      .main-content { transition: opacity 0.15s; }
+      .main-content.hidden { display: none; }
     </style>
   </head>
   <body>
@@ -189,6 +249,26 @@
       <div class="status-dot" title="Connected"></div>
     </div>
 
+
+    <!-- Connect screen (shown when not authenticated) -->
+    <div class="connect-screen" id="connect-screen">
+      <div class="connect-icon">
+        <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+      </div>
+      <div class="connect-title">Connect DataFielder</div>
+      <div class="connect-desc">Authorise DataFielder to access your Pipedrive data to populate fields and chat with AI.</div>
+      <a class="btn-connect" id="connect-btn" href="/oauth/start" target="_blank">
+        <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        Connect to Pipedrive
+      </a>
+      <div class="connect-note">
+        A browser tab will open for authorisation.<br>
+        Come back here once you've approved access.
+      </div>
+    </div>
+
+    <!-- Main content (hidden until connected) -->
+    <div class="main-content hidden" id="main-content">
     <!-- Tabs -->
     <div class="tabs" id="tabs">
       <button class="tab tab-active" id="tab-populate" onclick="switchTab('populate')">
@@ -273,9 +353,61 @@
       sdk = await new AppExtensionsSDK().initialize();
       try { await sdk.execute("resize", { height: 230 }); } catch(e) {}
 
-      const params   = Object.fromEntries(new URLSearchParams(location.search));
-      const resource = params.resource;
-      const id       = params.selectedIds || params.id;
+      const params      = Object.fromEntries(new URLSearchParams(location.search));
+      const resource    = params.resource;
+      const id          = params.selectedIds || params.id;
+      const companyId   = params.companyId;
+
+      const connectScreen = document.getElementById("connect-screen");
+      const mainContent   = document.getElementById("main-content");
+      const statusDot     = document.querySelector(".status-dot");
+
+      // Check connection status on load
+      async function checkConnection() {
+        try {
+          const r = await fetch(`/api/status?companyId=${encodeURIComponent(companyId || "")}`);
+          const d = await r.json();
+          return d.connected;
+        } catch(e) { return false; }
+      }
+
+      function showConnectScreen() {
+        connectScreen.classList.add("visible");
+        mainContent.classList.add("hidden");
+        statusDot.style.background = "#f59e0b";
+        statusDot.style.boxShadow  = "0 0 0 2px rgba(245,158,11,0.15)";
+        statusDot.title = "Not connected";
+        try { sdk.execute("resize", { height: 300 }); } catch(e) {}
+      }
+
+      function showMainContent() {
+        connectScreen.classList.remove("visible");
+        mainContent.classList.remove("hidden");
+      }
+
+      // Poll for connection after the connect button is clicked
+      // (user completes OAuth in new tab then comes back)
+      document.getElementById("connect-btn").addEventListener("click", () => {
+        // Start polling every 2s for up to 2 minutes
+        let attempts = 0;
+        const poll = setInterval(async () => {
+          attempts++;
+          const connected = await checkConnection();
+          if (connected) {
+            clearInterval(poll);
+            showMainContent();
+            resizeToContent();
+          }
+          if (attempts > 60) clearInterval(poll); // give up after 2 min
+        }, 2000);
+      });
+
+      const connected = await checkConnection();
+      if (!connected) {
+        showConnectScreen();
+        return; // stop here — don't set up the rest of the UI
+      }
+      showMainContent();
 
       // Person: show notice only
       if (resource === "person") {
@@ -345,6 +477,10 @@
         try {
           const res  = await fetch("/api/populate", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({resource, id, companyId:params.companyId, userId:params.userId, date_from:dateFrom.value, date_to:dateTo.value}) });
           const data = await res.json();
+          if (res.status === 401) {
+            showConnectScreen();
+            return;
+          }
           if (!res.ok) { showResult("error","Could not populate fields","",[{label:"Error",fields:[data.error||"Something went wrong"],chipCls:"chip-grey",icon:DASH}]); return; }
           const msg = data.message || "";
           if (msg.includes("already filled") || msg.includes("Nothing to do")) { showResult("warning","Already up to date","No changes",[{label:"Status",fields:["All fields already have values"],chipCls:"chip-grey",icon:DASH}]); return; }
@@ -415,6 +551,7 @@
 
         try {
           const res  = await fetch("/api/chat", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({messages: history, context: ctxCache, companyId: params.companyId}) });
+          if (res.status === 401) { thinking.remove(); showConnectScreen(); return; }
           const data = await res.json();
           thinking.remove();
           const reply = data.reply || data.error || "No response.";
@@ -458,5 +595,6 @@
       resizeToContent();
     })();
     </script>
+    </div><!-- /main-content -->
   </body>
 </html>

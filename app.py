@@ -6,7 +6,6 @@ import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-import sqlite3
 import time
 from openai import OpenAI
 
@@ -46,57 +45,78 @@ WEB_SEARCH_QUERIES = {
     "employee_count": '"{company_name}" number of employees headcount {domain}',
 }
 
-DB_PATH = "tokens.db"
+# Token storage uses Upstash Redis via REST API (persistent across Render restarts).
+# Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in your Render environment variables.
+# Sign up free at https://upstash.com  -- no extra Python packages needed.
+
+UPSTASH_URL   = os.getenv("UPSTASH_REDIS_REST_URL", "")
+UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
+
+# In-memory fallback (lost on restart, but gracefully degrades)
+_mem_store: dict = {}
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Database
-# ──────────────────────────────────────────────────────────────────────────────
-
-def db_init():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS tokens (
-            company_id    TEXT PRIMARY KEY,
-            access_token  TEXT NOT NULL,
-            refresh_token TEXT NOT NULL,
-            expires_at    INTEGER NOT NULL
+def _redis(cmd: list):
+    """Call Upstash Redis REST API. Returns parsed response or None on error."""
+    if not UPSTASH_URL or not UPSTASH_TOKEN:
+        return None
+    try:
+        r = requests.post(
+            UPSTASH_URL,
+            headers={"Authorization": f"Bearer {UPSTASH_TOKEN}", "Content-Type": "application/json"},
+            json=cmd,
+            timeout=5,
         )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS oauth_states (
-            state      TEXT PRIMARY KEY,
-            created_at INTEGER NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
-db_init()
+        return r.json().get("result") if r.status_code == 200 else None
+    except Exception:
+        return None
 
 
 def save_tokens(company_id, access_token, refresh_token, expires_in):
     expires_at = int(time.time()) + int(expires_in) - 60
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT OR REPLACE INTO tokens(company_id, access_token, refresh_token, expires_at) VALUES (?, ?, ?, ?)",
-        (company_id, access_token, refresh_token, expires_at),
-    )
-    conn.commit()
-    conn.close()
+    data = json.dumps({"access_token": access_token, "refresh_token": refresh_token, "expires_at": expires_at})
+    key  = f"df:tokens:{company_id}"
+    # Try Redis first
+    result = _redis(["SET", key, data, "EX", str(int(expires_in) + 86400)])
+    if result is None:
+        # Fallback to memory
+        _mem_store[key] = data
 
 
 def load_tokens(company_id):
-    conn = sqlite3.connect(DB_PATH)
-    row = conn.execute(
-        "SELECT access_token, refresh_token, expires_at FROM tokens WHERE company_id=?",
-        (company_id,),
-    ).fetchone()
-    conn.close()
-    if not row:
+    key = f"df:tokens:{company_id}"
+    # Try Redis first
+    raw = _redis(["GET", key])
+    if raw is None:
+        # Fallback to memory
+        raw = _mem_store.get(key)
+    if not raw:
         return None
-    return {"access_token": row[0], "refresh_token": row[1], "expires_at": row[2]}
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+# OAuth state uses Redis with 10-minute TTL (memory fallback for dev)
+_state_store: dict = {}
+
+
+def save_oauth_state_store(state):
+    key = f"df:state:{state}"
+    result = _redis(["SET", key, "1", "EX", "600"])
+    if result is None:
+        _state_store[state] = int(time.time()) + 600
+
+
+def consume_oauth_state_store(state):
+    key = f"df:state:{state}"
+    result = _redis(["GETDEL", key])
+    if result is not None:
+        return result == "1"
+    # Fallback memory
+    exp = _state_store.pop(state, None)
+    return exp is not None and int(time.time()) < exp
 
 
 def refresh_access_token(company_id: str, refresh_token: str):
@@ -138,21 +158,11 @@ def get_valid_token(company_id: str):
 
 
 def save_oauth_state(state):
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("INSERT INTO oauth_states(state, created_at) VALUES (?, ?)", (state, int(time.time())))
-    conn.commit()
-    conn.close()
+    save_oauth_state_store(state)
 
 
 def consume_oauth_state(state):
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM oauth_states WHERE created_at < ?", (int(time.time()) - 600,))
-    row = conn.execute("SELECT state FROM oauth_states WHERE state=?", (state,)).fetchone()
-    if row:
-        conn.execute("DELETE FROM oauth_states WHERE state=?", (state,))
-    conn.commit()
-    conn.close()
-    return row is not None
+    return consume_oauth_state_store(state)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1059,6 +1069,18 @@ async def api_chat(payload: dict):
         return {"reply": resp.output_text.strip()}
     except Exception as e:
         return JSONResponse({"error": "AI request failed", "details": str(e)}, status_code=500)
+
+
+@app.get("/api/status")
+async def api_status(companyId: str = ""):
+    """
+    Returns whether the app has a valid token for this company.
+    Called by the panel on load so it can show a Connect button if needed.
+    """
+    if not companyId:
+        return {"connected": False}
+    token = get_valid_token(companyId)
+    return {"connected": bool(token)}
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
