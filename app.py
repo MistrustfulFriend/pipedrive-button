@@ -645,6 +645,20 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/debug")
+def debug_config():
+    """Shows current config so you can verify env vars are loaded. Remove after fixing."""
+    return {
+        "PIPEDRIVE_CLIENT_ID_set":    bool(PIPEDRIVE_CLIENT_ID),
+        "PIPEDRIVE_CLIENT_ID_value":  PIPEDRIVE_CLIENT_ID[:6] + "..." if PIPEDRIVE_CLIENT_ID else "MISSING",
+        "PIPEDRIVE_CLIENT_ID_length": len(PIPEDRIVE_CLIENT_ID),
+        "BASE_URL":                   BASE_URL,
+        "REDIRECT_URI":               REDIRECT_URI,
+        "OPENAI_KEY_set":             bool(os.getenv("OPENAI_API_KEY")),
+        "UPSTASH_URL_set":            bool(UPSTASH_URL),
+    }
+
+
 @app.get("/oauth/start")
 def oauth_start():
     if not PIPEDRIVE_CLIENT_ID:
