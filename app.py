@@ -666,7 +666,7 @@ def oauth_start():
     state = secrets.token_urlsafe(32)
     save_oauth_state(state)
     auth_url = (
-        "https://oauth.pipedrive.com/oauth/authorize"
+        "https://oauth.pipedrive.com/marketplace/oauth/authorize"
         f"?client_id={PIPEDRIVE_CLIENT_ID}"
         f"&redirect_uri={REDIRECT_URI}"
         f"&response_type=code"
@@ -679,7 +679,7 @@ def oauth_start():
 def oauth_debug():
     """Shows the exact OAuth URL that would be built. Use to verify client_id and redirect_uri."""
     auth_url = (
-        "https://oauth.pipedrive.com/oauth/authorize"
+        "https://oauth.pipedrive.com/marketplace/oauth/authorize"
         f"?client_id={PIPEDRIVE_CLIENT_ID}"
         f"&redirect_uri={REDIRECT_URI}"
         f"&response_type=code"
