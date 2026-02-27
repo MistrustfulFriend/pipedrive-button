@@ -675,6 +675,24 @@ def oauth_start():
     return RedirectResponse(auth_url)
 
 
+@app.get("/oauth/debug")
+def oauth_debug():
+    """Shows the exact OAuth URL that would be built. Use to verify client_id and redirect_uri."""
+    auth_url = (
+        "https://oauth.pipedrive.com/oauth/authorize"
+        f"?client_id={PIPEDRIVE_CLIENT_ID}"
+        f"&redirect_uri={REDIRECT_URI}"
+        f"&response_type=code"
+        f"&state=TEST"
+    )
+    return {
+        "full_oauth_url":   auth_url,
+        "client_id":        PIPEDRIVE_CLIENT_ID,
+        "client_id_length": len(PIPEDRIVE_CLIENT_ID),
+        "redirect_uri":     REDIRECT_URI,
+    }
+
+
 @app.get("/oauth/callback")
 def oauth_callback(request: Request):
     code  = request.query_params.get("code")
