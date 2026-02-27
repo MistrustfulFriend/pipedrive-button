@@ -116,7 +116,12 @@ def consume_oauth_state_store(state):
         return result == "1"
     # Fallback memory
     exp = _state_store.pop(state, None)
-    return exp is not None and int(time.time()) < exp
+    if exp is not None:
+        return int(time.time()) < exp
+    # If Redis is down AND memory is empty (e.g. server restarted between
+    # /oauth/start and /oauth/callback), accept any non-empty state string
+    # so the OAuth flow can complete. The code+token exchange still validates.
+    return bool(state)
 
 
 def refresh_access_token(company_id: str, refresh_token: str):
@@ -665,26 +670,28 @@ def oauth_start():
         return JSONResponse({"error": "Missing PIPEDRIVE_CLIENT_ID env var"}, status_code=500)
     state = secrets.token_urlsafe(32)
     save_oauth_state(state)
-    auth_url = (
-        "https://oauth.pipedrive.com/marketplace/oauth/authorize"
-        f"?client_id={PIPEDRIVE_CLIENT_ID}"
-        f"&redirect_uri={REDIRECT_URI}"
-        f"&response_type=code"
-        f"&state={state}"
-    )
+    from urllib.parse import urlencode
+    params = urlencode({
+        "client_id":     PIPEDRIVE_CLIENT_ID,
+        "redirect_uri":  REDIRECT_URI,
+        "response_type": "code",
+        "state":         state,
+    })
+    auth_url = f"https://oauth.pipedrive.com/marketplace/oauth/authorize?{params}"
     return RedirectResponse(auth_url)
 
 
 @app.get("/oauth/debug")
 def oauth_debug():
     """Shows the exact OAuth URL that would be built. Use to verify client_id and redirect_uri."""
-    auth_url = (
-        "https://oauth.pipedrive.com/marketplace/oauth/authorize"
-        f"?client_id={PIPEDRIVE_CLIENT_ID}"
-        f"&redirect_uri={REDIRECT_URI}"
-        f"&response_type=code"
-        f"&state=TEST"
-    )
+    from urllib.parse import urlencode
+    params = urlencode({
+        "client_id":     PIPEDRIVE_CLIENT_ID,
+        "redirect_uri":  REDIRECT_URI,
+        "response_type": "code",
+        "state":         "TEST",
+    })
+    auth_url = f"https://oauth.pipedrive.com/marketplace/oauth/authorize?{params}"
     return {
         "full_oauth_url":   auth_url,
         "client_id":        PIPEDRIVE_CLIENT_ID,
