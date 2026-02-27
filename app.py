@@ -21,13 +21,13 @@ openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 ORG_FIELDS = {
     "address":        {"key": "address",                                       "type": "address", "label": "Address",                   "web_searchable": True},
     "industry":       {"key": "industry",                                      "type": "enum",    "label": "Industry",                   "web_searchable": False},
-    "annual_revenue": {"key": "annual_revenue",                                "type": "number",  "label": "Annual Revenue",             "web_searchable": True},
+    "annual_revenue": {"key": "annual_revenue",                                "type": "enum",    "label": "Annual Revenue",             "web_searchable": False},
     "employee_count": {"key": "employee_count",                                "type": "number",  "label": "Number of Employees",        "web_searchable": True},
     "phone":          {"key": "phone",                                         "type": "phone",   "label": "Phone Number",               "web_searchable": True},
     "email":          {"key": "email",                                         "type": "email",   "label": "Email",                      "web_searchable": True},
     "email2":         {"key": "901f73bf1243fa0baa769a41aef100674e792616",      "type": "text",    "label": "Second Email",               "web_searchable": False},
     "linkedin":       {"key": "linkedin",                                      "type": "text",    "label": "LinkedIn Profile",           "web_searchable": True},
-    "about":          {"key": "fd1f632d86b97eb74f18daadc8ea6d0afaf0f6a2",      "type": "text",    "label": "About",                      "web_searchable": False},
+    "about":          {"key": "5753a21c8517db7c72ca5a37fcd44cf0e2f6b24f",      "type": "text",    "label": "About",                      "web_searchable": False},
     "culture":        {"key": "f2de3e23b45d3ffa67abf8fdea7564c14f6ff9bb",      "type": "text",    "label": "Company Culture & Values",   "web_searchable": False},
 }
 
@@ -174,7 +174,8 @@ def consume_oauth_state(state):
 # Pipedrive helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
-def get_industry_options(access_token: str) -> list:
+def get_enum_options(access_token: str, field_key: str) -> list:
+    """Fetch dropdown options for any organisation enum field."""
     r = requests.get(
         "https://api.pipedrive.com/v1/organizationFields",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -183,9 +184,13 @@ def get_industry_options(access_token: str) -> list:
     if r.status_code != 200:
         return []
     for field in r.json().get("data", []):
-        if field.get("key") == "industry":
+        if field.get("key") == field_key:
             return field.get("options") or []
     return []
+
+
+def get_industry_options(access_token: str) -> list:
+    return get_enum_options(access_token, "industry")
 
 
 def is_empty(value) -> bool:
@@ -249,7 +254,7 @@ def fetch_website_text(url: str) -> str:
 # AI extraction helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
-def build_field_instructions(fields: list, industry_options: list) -> str:
+def build_field_instructions(fields: list, industry_options: list, revenue_options: list = None) -> str:
     lines = []
     for f in fields:
         info  = ORG_FIELDS[f]
@@ -259,7 +264,11 @@ def build_field_instructions(fields: list, industry_options: list) -> str:
             opts = ", ".join(f'"{o["label"]}"' for o in industry_options)
             lines.append(f'- "industry": Choose EXACTLY one from [{opts}]. Return null if none fit.')
         elif f == "annual_revenue":
-            lines.append('- "annual_revenue": Annual revenue as a plain number (no symbols/commas). E.g. 5000000. Null if not found.')
+            if revenue_options:
+                rev_opts = ", ".join(f'"{o["label"]}"' for o in revenue_options)
+                lines.append(f'- "annual_revenue": Choose EXACTLY one option from [{rev_opts}]. Return null if none fit.')
+            else:
+                lines.append('- "annual_revenue": Return null if not found.')
         elif f == "employee_count":
             lines.append('- "employee_count": Number of employees as a plain integer. If a range, use the midpoint. Null if not found.')
         elif f == "phone":
@@ -299,6 +308,7 @@ def ai_extract_from_website(
     website_text: str,
     fields: list,
     industry_options: list,
+    revenue_options: list = None,
 ) -> dict:
     prompt = f"""
 You are extracting structured data from a company website for a CRM system.
@@ -314,7 +324,7 @@ Extract the following fields. Return a single JSON object.
 Return null for any field not explicitly found in the text above.
 Do NOT invent or infer — only use information present in the source.
 
-{build_field_instructions(fields, industry_options)}
+{build_field_instructions(fields, industry_options, revenue_options)}
 
 Return ONLY valid JSON, no markdown, no explanation.
 """.strip()
@@ -339,6 +349,7 @@ def ai_extract_from_web(
     domain: str,
     fields: list,
     industry_options: list,
+    revenue_options: list = None,
 ) -> dict:
     """
     Uses OpenAI's web_search_preview tool to search for each missing field
@@ -361,7 +372,7 @@ def ai_extract_from_web(
         return {}
 
     search_block = "\n".join(search_hints)
-    field_instructions = build_field_instructions(fields, industry_options)
+    field_instructions = build_field_instructions(fields, industry_options, revenue_options)
 
     prompt = f"""
 You are a CRM data researcher. You need to find specific information about a company
@@ -608,13 +619,14 @@ STRICT RULES:
 # Value formatter
 # ──────────────────────────────────────────────────────────────────────────────
 
-def format_value_for_pipedrive(field_name: str, field_type: str, raw_value, industry_options: list):
+def format_value_for_pipedrive(field_name: str, field_type: str, raw_value, industry_options: list, revenue_options: list = None):
     if raw_value is None:
         return None
 
     if field_type == "enum":
         label = str(raw_value).strip()
-        for opt in industry_options:
+        opts = revenue_options if (field_name == "annual_revenue" and revenue_options) else industry_options
+        for opt in opts:
             if opt.get("label", "").lower() == label.lower():
                 return opt["id"]
         return None
@@ -846,6 +858,9 @@ async def api_populate(payload: dict):
     industry_options = []
     if "industry" in fields_to_fill:
         industry_options = get_industry_options(access_token)
+    revenue_options = []
+    if "annual_revenue" in fields_to_fill:
+        revenue_options = get_enum_options(access_token, "annual_revenue")
 
     org_name = data.get("name", "")
 
@@ -864,6 +879,7 @@ async def api_populate(payload: dict):
             website_text=website_text,
             fields=fields_to_fill,
             industry_options=industry_options,
+            revenue_options=revenue_options,
         )
     except Exception as e:
         return JSONResponse({"error": "AI extraction (website) failed", "details": str(e)}, status_code=500)
@@ -884,6 +900,7 @@ async def api_populate(payload: dict):
                 domain=domain,
                 fields=still_missing,
                 industry_options=industry_options,
+                revenue_options=revenue_options,
             )
         except Exception:
             pass  # web search is best-effort — don't fail the whole request
@@ -910,6 +927,7 @@ async def api_populate(payload: dict):
             ORG_FIELDS[field_name]["type"],
             raw_value,
             industry_options,
+            revenue_options,
         )
         if formatted is None:
             not_found.append(ORG_FIELDS[field_name]["label"])
