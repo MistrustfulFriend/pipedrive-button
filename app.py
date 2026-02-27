@@ -1,1086 +1,1312 @@
+from flask import Flask, request, jsonify, send_file, session
+from flask_cors import CORS
+import openai
 import os
-import re
-import json
+from datetime import datetime, timedelta
+import random
+from dotenv import load_dotenv
+from pymongo import MongoClient
+from bson import ObjectId
+from werkzeug.security import generate_password_hash, check_password_hash
 import secrets
-import requests
-from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-import time
-from openai import OpenAI
 
-app = FastAPI()
+load_dotenv()
 
-BASE_URL = os.getenv("BASE_URL", "https://pipedrive-button.onrender.com")
-PIPEDRIVE_CLIENT_ID = os.getenv("PIPEDRIVE_CLIENT_ID", "")
-REDIRECT_URI = f"{BASE_URL}/oauth/callback"
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
-# ── Field definitions ─────────────────────────────────────────────────────────
-# web_searchable: whether a targeted web search makes sense for this field
-ORG_FIELDS = {
-    "address":        {"key": "address",                                       "type": "address", "label": "Address",                   "web_searchable": True},
-    "industry":       {"key": "industry",                                      "type": "enum",    "label": "Industry",                   "web_searchable": False},
-    "annual_revenue": {"key": "annual_revenue",                                "type": "number",  "label": "Annual Revenue",             "web_searchable": True},
-    "employee_count": {"key": "employee_count",                                "type": "number",  "label": "Number of Employees",        "web_searchable": True},
-    "phone":          {"key": "phone",                                         "type": "phone",   "label": "Phone Number",               "web_searchable": True},
-    "email":          {"key": "email",                                         "type": "email",   "label": "Email",                      "web_searchable": True},
-    "email2":         {"key": "901f73bf1243fa0baa769a41aef100674e792616",      "type": "text",    "label": "Second Email",               "web_searchable": False},
-    "linkedin":       {"key": "linkedin",                                      "type": "text",    "label": "LinkedIn Profile",           "web_searchable": True},
-    "about":          {"key": "fd1f632d86b97eb74f18daadc8ea6d0afaf0f6a2",      "type": "text",    "label": "About",                      "web_searchable": False},
-    "culture":        {"key": "f2de3e23b45d3ffa67abf8fdea7564c14f6ff9bb",      "type": "text",    "label": "Company Culture & Values",   "web_searchable": False},
+# Secret key for sessions
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = False  # Set to True in production with HTTPS
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
+
+openai.api_key = os.environ.get('OPENAI_API_KEY')
+
+# MongoDB Setup
+MONGODB_URI = os.environ.get('MONGODB_URI')
+if not MONGODB_URI:
+    print("WARNING: MONGODB_URI environment variable is not set!")
+else:
+    try:
+        client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+        db = client['german_learning']
+        users_collection = db['users']
+        dictionary_collection = db['dictionary']
+        log_collection = db['learning_log']
+        print("✓ MongoDB connected successfully")
+    except Exception as e:
+        print(f"MongoDB connection error: {e}")
+        client = None
+        db = None
+
+if not openai.api_key:
+    print("WARNING: OPENAI_API_KEY environment variable is not set!")
+
+# Exercise history to avoid repetition
+exercise_history = []
+MAX_HISTORY = 20
+
+TOPIC_DESCRIPTIONS = {
+    'conv_greetings': 'basic greetings, introductions, and polite phrases',
+    'conv_food': 'food items, dining, ordering at restaurants',
+    'conv_travel': 'travel vocabulary, directions, transportation',
+    'conv_shopping': 'shopping, prices, clothing, stores, money',
+    'conv_work': 'work, business, professional communication',
+    'conv_hobbies': 'hobbies, leisure activities, sports',
+    'conv_family': 'family members, relationships, personal life',
+    'conv_health': 'health, body parts, medical situations',
+    'conv_weather': 'weather conditions, nature, seasons',
+    'conv_education': 'education, learning, school, university',
+    'conv_technology': 'technology, media, internet, computers',
+    'conv_culture': 'culture, traditions, customs, celebrations',
+    'conv_housing': 'housing, apartments, living situations',
+    'conv_emergency': 'emergency situations, urgent communication',
+    'conv_entertainment': 'entertainment, events, concerts, theater',
+    'conv_opinions': 'expressing opinions, agreeing, disagreeing',
+    'conv_smalltalk': 'small talk, chitchat, casual conversation',
+    'conv_complaints': 'complaints, problems, dissatisfaction',
+    'gram_cases': 'German cases (Nominativ, Akkusativ, Dativ, Genitiv)',
+    'gram_articles': 'German articles (der, die, das)',
+    'gram_verbs': 'verb conjugation in German',
+    'gram_tenses': 'German tenses (present, past, future)',
+    'gram_word_order': 'German word order and sentence structure',
+    'gram_prepositions': 'German prepositions and their cases',
+    'gram_adjectives': 'adjective endings in German',
+    'gram_modal': 'German modal verbs (können, müssen, etc.)',
+    'gram_pronouns': 'pronouns (personal, possessive, demonstrative)',
+    'gram_reflexive': 'reflexive verbs in German',
+    'gram_separable': 'separable and inseparable verbs',
+    'gram_passive': 'passive voice construction',
+    'gram_subjunctive': 'subjunctive mood (Konjunktiv I & II)',
+    'gram_imperatives': 'imperatives and commands',
+    'gram_comparatives': 'comparatives and superlatives',
+    'gram_conjunctions': 'conjunctions and connectors',
+    'gram_relative': 'relative clauses',
+    'gram_infinitive': 'infinitive constructions (zu + infinitive)',
+    'vocab_verbs': 'common German verbs',
+    'vocab_nouns': 'common German nouns with articles',
+    'vocab_adjectives': 'German adjectives and adverbs',
+    'vocab_phrases': 'useful German phrases and idioms',
+    'vocab_numbers': 'German numbers and time expressions',
+    'vocab_colors': 'German colors and descriptions',
+    'vocab_emotions': 'emotions and feelings vocabulary',
+    'vocab_animals': 'animals and pets',
+    'vocab_clothing': 'clothing and fashion vocabulary',
+    'vocab_transport': 'transportation vocabulary',
+    'vocab_professions': 'professions and jobs',
+    'vocab_kitchen': 'kitchen and cooking vocabulary',
+    'vocab_sports': 'sports and fitness vocabulary',
+    'vocab_office': 'office and business vocabulary'
 }
 
-DEAL_FIELDS = {
-    "deal_context": {"key": "e637e09d69529de9a304c5a82a7a16eccee68c83", "type": "text", "label": "Deal Context"},
-}
+CREATIVE_SCENARIOS = [
+    "You're at a German farmers market and discover an unusual vegetable",
+    "You accidentally joined a German book club meeting",
+    "You're teaching your German neighbor how to make your favorite dish",
+    "You found a mysterious letter in German in an old book",
+    "You're helping organize a surprise party for a German friend",
+    "You're at a German flea market negotiating for a vintage item",
+    "You met a German time traveler from 1920",
+    "You're explaining your unusual hobby to curious Germans",
+    "You're stuck in an elevator with Germans and making small talk",
+    "You're collaborating with Germans on a quirky art project"
+]
 
-# Web search queries per field — {company_name} and {domain} are substituted at runtime
-WEB_SEARCH_QUERIES = {
-    "phone":          '"{company_name}" phone number contact',
-    "email":          '"{company_name}" contact email {domain}',
-    "address":        '"{company_name}" office address headquarters {domain}',
-    "linkedin":       '"{company_name}" LinkedIn company page site:linkedin.com/company',
-    "annual_revenue": '"{company_name}" annual revenue turnover {domain}',
-    "employee_count": '"{company_name}" number of employees headcount {domain}',
-}
+CREATIVE_WRITING_PROMPTS = [
+    "You discovered a magic portal in your local library",
+    "You woke up speaking only German in a parallel universe",
+    "You're writing a letter to your future self 10 years from now",
+    "You found a mysterious package with your name on it",
+    "You can communicate with animals for one day",
+    "You're the last person on Earth who remembers yesterday",
+    "You inherited a peculiar object from a distant relative",
+    "You can see 5 minutes into the future"
+]
 
-# Token storage uses Upstash Redis via REST API (persistent across Render restarts).
-# Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in your Render environment variables.
-# Sign up free at https://upstash.com  -- no extra Python packages needed.
+# ==================== AUTHENTICATION MIDDLEWARE ====================
 
-UPSTASH_URL   = os.getenv("UPSTASH_REDIS_REST_URL", "")
-UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
+def login_required(f):
+    """Decorator to require login for routes"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return jsonify({"error": "Authentication required", "auth_required": True}), 401
+        return f(*args, **kwargs)
+    return decorated_function
 
-# In-memory fallback (lost on restart, but gracefully degrades)
-_mem_store: dict = {}
+def get_current_user_id():
+    """Get current logged-in user ID"""
+    return session.get('user_id')
 
+# ==================== AUTHENTICATION ROUTES ====================
 
-def _redis(cmd: list):
-    """Call Upstash Redis REST API. Returns parsed response or None on error."""
-    if not UPSTASH_URL or not UPSTASH_TOKEN:
-        return None
+@app.route('/api/auth/register', methods=['POST'])
+def register():
+    """Register a new user"""
     try:
-        r = requests.post(
-            UPSTASH_URL,
-            headers={"Authorization": f"Bearer {UPSTASH_TOKEN}", "Content-Type": "application/json"},
-            json=cmd,
-            timeout=5,
+        if db is None:
+            return jsonify({"error": "Database not connected"}), 500
+        
+        data = request.json
+        username = data.get('username', '').strip().lower()
+        password = data.get('password', '')
+        email = data.get('email', '').strip().lower()
+        
+        if not username or len(username) < 3:
+            return jsonify({"error": "Username must be at least 3 characters"}), 400
+        
+        if not password or len(password) < 6:
+            return jsonify({"error": "Password must be at least 6 characters"}), 400
+        
+        if users_collection.find_one({'username': username}):
+            return jsonify({"error": "Username already exists"}), 400
+        
+        if email and users_collection.find_one({'email': email}):
+            return jsonify({"error": "Email already registered"}), 400
+        
+        user = {
+            'username': username,
+            'email': email,
+            'password_hash': generate_password_hash(password),
+            'created_at': datetime.now().isoformat(),
+            'last_login': None
+        }
+        
+        result = users_collection.insert_one(user)
+        user_id = str(result.inserted_id)
+        
+        session.permanent = True
+        session['user_id'] = user_id
+        session['username'] = username
+        
+        return jsonify({
+            "success": True,
+            "user": {
+                "id": user_id,
+                "username": username,
+                "email": email
+            }
+        }), 201
+        
+    except Exception as e:
+        print(f"Registration error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    """Login user"""
+    try:
+        if db is None:
+            return jsonify({"error": "Database not connected"}), 500
+        
+        data = request.json
+        username = data.get('username', '').strip().lower()
+        password = data.get('password', '')
+        
+        if not username or not password:
+            return jsonify({"error": "Username and password required"}), 400
+        
+        user = users_collection.find_one({'username': username})
+        
+        if not user or not check_password_hash(user['password_hash'], password):
+            return jsonify({"error": "Invalid username or password"}), 401
+        
+        users_collection.update_one(
+            {'_id': user['_id']},
+            {'$set': {'last_login': datetime.now().isoformat()}}
         )
-        return r.json().get("result") if r.status_code == 200 else None
-    except Exception:
-        return None
+        
+        session.permanent = True
+        session['user_id'] = str(user['_id'])
+        session['username'] = user['username']
+        
+        return jsonify({
+            "success": True,
+            "user": {
+                "id": str(user['_id']),
+                "username": user['username'],
+                "email": user.get('email', '')
+            }
+        }), 200
+        
+    except Exception as e:
+        print(f"Login error: {e}")
+        return jsonify({"error": str(e)}), 500
 
+@app.route('/api/auth/logout', methods=['POST'])
+def logout():
+    """Logout user"""
+    session.clear()
+    return jsonify({"success": True}), 200
 
-def save_tokens(company_id, access_token, refresh_token, expires_in):
-    expires_at = int(time.time()) + int(expires_in) - 60
-    data = json.dumps({"access_token": access_token, "refresh_token": refresh_token, "expires_at": expires_at})
-    key  = f"df:tokens:{company_id}"
-    # Try Redis first
-    result = _redis(["SET", key, data, "EX", str(int(expires_in) + 86400)])
-    if result is None:
-        # Fallback to memory
-        _mem_store[key] = data
-
-
-def load_tokens(company_id):
-    key = f"df:tokens:{company_id}"
-    # Try Redis first
-    raw = _redis(["GET", key])
-    if raw is None:
-        # Fallback to memory
-        raw = _mem_store.get(key)
-    if not raw:
-        return None
+@app.route('/api/auth/me', methods=['GET'])
+@login_required
+def get_current_user():
+    """Get current user info"""
     try:
-        return json.loads(raw)
-    except Exception:
-        return None
-
-
-# OAuth state uses Redis with 10-minute TTL (memory fallback for dev)
-_state_store: dict = {}
-
-
-def save_oauth_state_store(state):
-    key = f"df:state:{state}"
-    result = _redis(["SET", key, "1", "EX", "600"])
-    if result is None:
-        _state_store[state] = int(time.time()) + 600
-
-
-def consume_oauth_state_store(state):
-    key = f"df:state:{state}"
-    result = _redis(["GETDEL", key])
-    if result is not None:
-        return result == "1"
-    # Fallback memory
-    exp = _state_store.pop(state, None)
-    return exp is not None and int(time.time()) < exp
-
-
-def refresh_access_token(company_id: str, refresh_token: str):
-    """Exchange a refresh token for a new access token. Saves and returns new tokens, or None on failure."""
-    client_id     = os.getenv("PIPEDRIVE_CLIENT_ID", "")
-    client_secret = os.getenv("PIPEDRIVE_CLIENT_SECRET", "")
-    if not client_id or not client_secret:
-        return None
-    try:
-        r = requests.post(
-            "https://oauth.pipedrive.com/oauth/token",
-            data={
-                "grant_type":    "refresh_token",
-                "refresh_token": refresh_token,
-                "client_id":     client_id,
-                "client_secret": client_secret,
-            },
-            timeout=15,
-        )
-        if r.status_code != 200:
-            return None
-        t = r.json()
-        save_tokens(company_id, t["access_token"], t["refresh_token"], int(t.get("expires_in", 3600)))
-        return t["access_token"]
-    except Exception:
-        return None
-
-
-def get_valid_token(company_id: str):
-    """Return a valid access token, refreshing automatically if expired. Returns None if not connected."""
-    tokens = load_tokens(company_id)
-    if not tokens:
-        return None
-    # Refresh if expired or expiring within 5 minutes
-    if int(time.time()) >= tokens["expires_at"] - 300:
-        new_token = refresh_access_token(company_id, tokens["refresh_token"])
-        return new_token  # None if refresh failed
-    return tokens["access_token"]
-
-
-def save_oauth_state(state):
-    save_oauth_state_store(state)
-
-
-def consume_oauth_state(state):
-    return consume_oauth_state_store(state)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Pipedrive helpers
-# ──────────────────────────────────────────────────────────────────────────────
-
-def get_industry_options(access_token: str) -> list:
-    r = requests.get(
-        "https://api.pipedrive.com/v1/organizationFields",
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=30,
-    )
-    if r.status_code != 200:
-        return []
-    for field in r.json().get("data", []):
-        if field.get("key") == "industry":
-            return field.get("options") or []
-    return []
-
-
-def is_empty(value) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, str) and value.strip() == "":
-        return True
-    if isinstance(value, list) and len(value) == 0:
-        return True
-    if isinstance(value, list) and all(not (v.get("value") or "").strip() for v in value if isinstance(v, dict)):
-        return True
-    return False
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Website scraper
-# ──────────────────────────────────────────────────────────────────────────────
-
-def fetch_website_text(url: str) -> str:
-    if not url:
-        return ""
-    if not url.startswith("http"):
-        url = "https://" + url
-    try:
-        r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code != 200:
-            return ""
-    except Exception:
-        return ""
-
-    html = r.text
-    for tag in ["<script", "<style"]:
-        while True:
-            i = html.lower().find(tag)
-            if i == -1:
-                break
-            j = html.lower().find("</", i)
-            if j == -1:
-                break
-            k = html.find(">", j)
-            if k == -1:
-                break
-            html = html[:i] + html[k + 1:]
-
-    text = []
-    in_tag = False
-    for ch in html:
-        if ch == "<":
-            in_tag = True
-            continue
-        if ch == ">":
-            in_tag = False
-            continue
-        if not in_tag:
-            text.append(ch)
-
-    return " ".join("".join(text).split())[:10000]
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# AI extraction helpers
-# ──────────────────────────────────────────────────────────────────────────────
-
-def build_field_instructions(fields: list, industry_options: list) -> str:
-    lines = []
-    for f in fields:
-        info  = ORG_FIELDS[f]
-        ftype = info["type"]
-
-        if f == "industry":
-            opts = ", ".join(f'"{o["label"]}"' for o in industry_options)
-            lines.append(f'- "industry": Choose EXACTLY one from [{opts}]. Return null if none fit.')
-        elif f == "annual_revenue":
-            lines.append('- "annual_revenue": Annual revenue as a plain number (no symbols/commas). E.g. 5000000. Null if not found.')
-        elif f == "employee_count":
-            lines.append('- "employee_count": Number of employees as a plain integer. If a range, use the midpoint. Null if not found.')
-        elif f == "phone":
-            lines.append('- "phone": Primary phone number as a plain string including country code if present. Null if not found.')
-        elif f == "email":
-            lines.append('- "email": Primary contact email address. Null if not found.')
-        elif f == "email2":
-            lines.append('- "email2": A secondary/alternative contact email different from the primary. Null if not found.')
-        elif f == "linkedin":
-            lines.append('- "linkedin": Company LinkedIn URL (linkedin.com/company/...). Null if not found.')
-        elif f == "address":
-            lines.append('- "address": Full office/headquarters address as a single string. Null if not found.')
-        elif f == "about":
-            lines.append('- "about": 4-6 sentence plain-text description: what they do, industry, size, location, specialities.')
-        elif f == "culture":
-            lines.append('- "culture": 2-4 sentences on company culture, values, or work environment. Null if nothing relevant found.')
-    return "\n".join(lines)
-
-
-def parse_json_response(raw: str) -> dict:
-    raw = raw.strip()
-    raw = re.sub(r"^```[a-z]*\n?", "", raw)
-    raw = re.sub(r"\n?```$", "", raw)
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# PASS 1 — Extract from website text
-# ──────────────────────────────────────────────────────────────────────────────
-
-def ai_extract_from_website(
-    name: str,
-    website_url: str,
-    website_text: str,
-    fields: list,
-    industry_options: list,
-) -> dict:
-    prompt = f"""
-You are extracting structured data from a company website for a CRM system.
-
-Company name: {name}
-Website: {website_url}
-
-== WEBSITE TEXT (your ONLY source) ==
-{website_text}
-== END ==
-
-Extract the following fields. Return a single JSON object.
-Return null for any field not explicitly found in the text above.
-Do NOT invent or infer — only use information present in the source.
-
-{build_field_instructions(fields, industry_options)}
-
-Return ONLY valid JSON, no markdown, no explanation.
-""".strip()
-
-    resp = openai_client.responses.create(
-        model="gpt-4.1-mini",
-        input=[
-            {"role": "system", "content": "You are a precise data extraction assistant. Return only valid JSON. Never invent data."},
-            {"role": "user", "content": prompt},
-        ],
-    )
-    return parse_json_response(resp.output_text)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# PASS 2 — Web search for remaining missing fields
-# ──────────────────────────────────────────────────────────────────────────────
-
-def ai_extract_from_web(
-    name: str,
-    website_url: str,
-    domain: str,
-    fields: list,
-    industry_options: list,
-) -> dict:
-    """
-    Uses OpenAI's web_search_preview tool to search for each missing field
-    with a targeted, company-specific query. All searches happen in a single
-    AI call — the model searches, reads results, and extracts a JSON object.
-
-    Crucially: the prompt instructs the model to verify that results are
-    genuinely about THIS company (matched by name + domain) before extracting.
-    """
-
-    # Build the search strategy description per field
-    search_hints = []
-    for f in fields:
-        query = WEB_SEARCH_QUERIES.get(f, "")
-        if query:
-            q = query.format(company_name=name, domain=domain)
-            search_hints.append(f'- For "{f}": search for: {q}')
-
-    if not search_hints:
-        return {}
-
-    search_block = "\n".join(search_hints)
-    field_instructions = build_field_instructions(fields, industry_options)
-
-    prompt = f"""
-You are a CRM data researcher. You need to find specific information about a company
-by searching the web. The company details are:
-
-  Company name: {name}
-  Website: {website_url}
-  Domain: {domain}
-
-IMPORTANT ACCURACY RULE:
-Before extracting any value, verify that the search result is genuinely about
-THIS company — it must match both the company name AND the domain ({domain}).
-If a result is about a different company with a similar name, ignore it entirely.
-If you are not confident a result refers to this exact company, return null for that field.
-
-Search strategy (use one search per field):
-{search_block}
-
-After searching, extract the following fields into a single JSON object.
-Return null for any field you could not find with high confidence.
-
-{field_instructions}
-
-Return ONLY valid JSON, no markdown, no explanation.
-""".strip()
-
-    resp = openai_client.responses.create(
-        model="gpt-4.1-mini",
-        tools=[{"type": "web_search_preview"}],
-        input=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a precise CRM data researcher. You use web search to find factual "
-                    "company information. You only extract data you are confident belongs to the "
-                    "specific company identified by name AND domain. You return only valid JSON."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-    )
-    return parse_json_response(resp.output_text)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Deal summary
-# ──────────────────────────────────────────────────────────────────────────────
-
-def fetch_deal_notes(deal_id: str, headers: dict, date_from: str = "", date_to: str = "") -> list:
-    """Fetch up to 50 most recent notes for a deal, newest first. Optionally filter by date range."""
-    r = requests.get(
-        "https://api.pipedrive.com/v1/notes",
-        params={"deal_id": deal_id, "limit": 50, "sort": "add_time DESC"},
-        headers=headers,
-        timeout=30,
-    )
-    if r.status_code != 200:
-        return []
-    notes = r.json().get("data") or []
-    return _filter_by_date(notes, "add_time", date_from, date_to)
-
-
-def _filter_by_date(items: list, date_key: str, date_from: str, date_to: str) -> list:
-    """Filter a list of dicts by a date field. Dates are YYYY-MM-DD strings."""
-    if not date_from and not date_to:
-        return items
-    result = []
-    for item in items:
-        raw = (item.get(date_key) or "")[:10]
-        if not raw:
-            result.append(item)
-            continue
-        if date_from and raw < date_from:
-            continue
-        if date_to and raw > date_to:
-            continue
-        result.append(item)
-    return result
-
-
-def fetch_deal_activities(deal_id: str, headers: dict, date_from: str = "", date_to: str = "") -> list:
-    """Fetch up to 50 most recent activities for a deal using v2 API. Optionally filter by date range."""
-    r = requests.get(
-        "https://api.pipedrive.com/api/v2/activities",
-        params={"deal_id": deal_id, "limit": 50, "sort_by": "add_time", "sort_direction": "desc"},
-        headers=headers,
-        timeout=30,
-    )
-    if r.status_code != 200:
-        return []
-    activities = r.json().get("data") or []
-    return _filter_by_date(activities, "due_date", date_from, date_to)
-
-
-def clean_html(text: str) -> str:
-    """Strip HTML tags from note content."""
-    return re.sub(r"<[^>]+>", " ", text or "").strip()
-
-
-def format_notes_block(notes: list) -> str:
-    if not notes:
-        return ""
-    lines = ["== NOTES =="]
-    for n in notes:
-        date    = (n.get("add_time") or "")[:10]
-        content = clean_html(n.get("content", "")).strip()
-        if content:
-            lines.append(f"[{date}] {content}")
-    return "\n".join(lines) if len(lines) > 1 else ""
-
-
-def format_activities_block(activities: list) -> str:
-    if not activities:
-        return ""
-    lines = ["== ACTIVITIES =="]
-    for a in activities:
-        date    = (a.get("due_date") or a.get("add_time") or "")[:10]
-        atype   = a.get("type", "activity")
-        subject = a.get("subject") or ""
-        done    = "\u2713" if a.get("done") else "\u25cb"
-        note_txt = clean_html(a.get("note", "")).strip()
-        entry   = f"[{date}] {done} {atype.upper()}: {subject}"
-        if note_txt and note_txt != subject:
-            entry += f" \u2014 {note_txt[:300]}"
-        lines.append(entry)
-    return "\n".join(lines) if len(lines) > 1 else ""
-
-
-def ai_write_deal_summary(record: dict, notes: list, activities: list) -> str:
-    title       = record.get("title", "")
-    value       = record.get("value", "")
-    currency    = record.get("currency", "")
-    probability = record.get("probability", "")
-    close_date  = record.get("close_time") or record.get("expected_close_date") or ""
-    if close_date:
-        close_date = str(close_date)[:10]
-    status      = record.get("status", "")
-    pipeline    = (record.get("pipeline_id") or {}).get("name", "") if isinstance(record.get("pipeline_id"), dict) else ""
-    stage       = (record.get("stage_id") or {}).get("name", "") if isinstance(record.get("stage_id"), dict) else str(record.get("stage_id") or "")
-    owner       = (record.get("owner_id") or {}).get("name", "") if isinstance(record.get("owner_id"), dict) else ""
-    org         = (record.get("org_id") or {}).get("name", "") if isinstance(record.get("org_id"), dict) else record.get("org_id") or ""
-    person      = (record.get("person_id") or {}).get("name", "") if isinstance(record.get("person_id"), dict) else record.get("person_id") or ""
-
-    # Build deal details block—only include lines where a value exists
-    detail_lines = [f"Title:        {title}"]
-    if value:
-        val_str = f"{value:,}" if isinstance(value, (int, float)) else str(value)
-        detail_lines.append(f"Value:        {val_str} {currency}".strip())
-    if probability not in (None, "", "null"):
-        detail_lines.append(f"Probability:  {probability}%")
-    if close_date:
-        detail_lines.append(f"Close date:   {close_date}")
-    if status:
-        detail_lines.append(f"Status:       {status}")
-    if pipeline:
-        detail_lines.append(f"Pipeline:     {pipeline}")
-    if stage:
-        detail_lines.append(f"Stage:        {stage}")
-    if owner:
-        detail_lines.append(f"Owner:        {owner}")
-    if org:
-        detail_lines.append(f"Organisation: {org}")
-    if person:
-        detail_lines.append(f"Contact:      {person}")
-
-    deal_details = "\n".join(detail_lines)
-
-    notes_block      = format_notes_block(notes)
-    activities_block = format_activities_block(activities)
-    has_history      = bool(notes_block or activities_block)
-
-    history_section = ""
-    if has_history:
-        parts = [p for p in [notes_block, activities_block] if p]
-        history_section = "\n\n" + "\n\n".join(parts)
-
-    # Build mandatory-facts rule so the model is explicitly told what to include
-    mandatory_parts = []
-    if value:
-        mandatory_parts.append("deal value")
-    if probability not in (None, "", "null"):
-        mandatory_parts.append("win probability")
-    if close_date:
-        mandatory_parts.append("expected close date")
-    if stage:
-        mandatory_parts.append("current stage")
-    mandatory_str = ", ".join(mandatory_parts)
-    mandatory_rule = (
-        f"- Your summary MUST mention the following facts (if present): {mandatory_str}. "
-        "Never omit these \xe2\x80\x94 they are the most important numbers for the sales team."
-    ) if mandatory_parts else ""
-
-    if has_history:
-        instruction = (
-            "Write a 4-7 sentence deal context summary for a sales team. "
-            "Start with a one-sentence snapshot that includes the deal value, win probability, "
-            "current stage, and expected close date. "
-            "Then cover: what has happened so far, key discussion points or concerns raised, "
-            "current status, and the logical next step. "
-            "Be specific \xe2\x80\x94 reference actual dates, topics, and outcomes from the history. "
-            "Plain text only, no bullet points."
-        )
+        if db is None:
+            return jsonify({"error": "Database not connected"}), 500
+        
+        user_id = get_current_user_id()
+        user = users_collection.find_one({'_id': ObjectId(user_id)})
+        
+        if not user:
+            session.clear()
+            return jsonify({"error": "User not found"}), 404
+        
+        return jsonify({
+            "user": {
+                "id": str(user['_id']),
+                "username": user['username'],
+                "email": user.get('email', ''),
+                "created_at": user.get('created_at')
+            }
+        }), 200
+        
+    except Exception as e:
+        print(f"Get user error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/auth/check', methods=['GET'])
+def check_auth():
+    """Check if user is authenticated"""
+    if 'user_id' in session:
+        return jsonify({
+            "authenticated": True,
+            "username": session.get('username')
+        }), 200
     else:
-        instruction = (
-            "Write a 3-5 sentence deal context note useful before a first sales call. "
-            "Start with a one-sentence snapshot that includes the deal value, win probability, "
-            "current stage, and expected close date. "
-            "Plain text only, no bullet points."
-        )
+        return jsonify({"authenticated": False}), 200
 
-    prompt = f"""
-{instruction}
+# ==================== STATIC FILE ROUTES - KEEP ONLY ONE SET ====================
 
-== DEAL DETAILS ==
-{deal_details}{history_section}
+@app.route('/')
+def home():
+    return send_file('index.html')
 
-STRICT RULES:
-- Use only information present above. Do not invent facts.
-- Do not repeat field labels verbatim (e.g. don't write "Value: 50,000 EUR" \xe2\x80\x94 write "a \xe2\x82\xac50,000 deal").
-- Do not say "according to the notes" or reference the data structure.
-- Write as a natural, useful briefing paragraph.
-{mandatory_rule}
-""".strip()
+@app.route('/login.html')
+def login_page():
+    return send_file('login.html')
 
-    resp = openai_client.responses.create(
-        model="gpt-4.1-mini",
-        input=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a precise CRM assistant writing deal briefings for sales reps. "
-                    "You synthesize deal data, notes and activity history into a clear, actionable summary. "
-                    "You ALWAYS include the deal value, win probability, stage, and close date when they are available. "
-                    "You never invent facts."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-    )
-    return resp.output_text.strip()
+@app.route('/style.css')
+def serve_css():
+    return send_file('style.css')
 
+@app.route('/script.js')
+def serve_js():
+    return send_file('script.js')
+# ==================== EXERCISE GENERATION (keeping existing functions) ====================
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Value formatter
-# ──────────────────────────────────────────────────────────────────────────────
-
-def format_value_for_pipedrive(field_name: str, field_type: str, raw_value, industry_options: list):
-    if raw_value is None:
-        return None
-
-    if field_type == "enum":
-        label = str(raw_value).strip()
-        for opt in industry_options:
-            if opt.get("label", "").lower() == label.lower():
-                return opt["id"]
-        return None
-
-    elif field_type == "phone":
-        return [{"value": str(raw_value).strip(), "primary": True, "label": "work"}]
-
-    elif field_type == "email":
-        return [{"value": str(raw_value).strip(), "primary": True, "label": "work"}]
-
-    elif field_type == "number":
-        try:
-            cleaned = re.sub(r"[^\d.]", "", str(raw_value))
-            return float(cleaned) if "." in cleaned else int(cleaned)
-        except (ValueError, TypeError):
-            return None
-
+def generate_exercise(topics, exercise_type, dictionary_words=None):
+    """Generate creative, non-repetitive exercises with improved prompts"""
+    
+    if not openai.api_key:
+        return "Error: OpenAI API key not configured."
+    
+    # Build topic context
+    topic_descriptions = []
+    custom_text = None
+    
+    for t in topics:
+        if t.get('value') == 'custom_practice':
+            custom_text = t.get('text', '')
+        else:
+            topic_descriptions.append(TOPIC_DESCRIPTIONS.get(t['value'], t['value']))
+    
+    # Determine topic context
+    if custom_text:
+        topic_context = f"Custom topic: {custom_text}"
+    elif topic_descriptions:
+        topic_context = ", ".join(topic_descriptions)
     else:
-        return str(raw_value).strip() if str(raw_value).strip() else None
+        topic_context = "general German practice"
+    
+    # Build history context
+    history_context = ""
+    if exercise_history:
+        recent = exercise_history[-5:]
+        history_context = f"\n\nPrevious exercises to avoid repeating:\n" + "\n".join([f"- {ex}" for ex in recent])
+    
+    # Dictionary words context
+    dict_context = ""
+    if dictionary_words and len(dictionary_words) > 0:
+        words_list = [f"{w['german']} ({w['english']})" for w in dictionary_words[:5]]
+        dict_context = f"\n\nMust include these words: {', '.join(words_list)}"
+    
+    prompts = {
+        'translation': f"""Create a German-to-English translation exercise.
 
+TOPIC: {topic_context}
+{dict_context}
+{history_context}
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Routes
-# ──────────────────────────────────────────────────────────────────────────────
+REQUIREMENTS:
+- Level: A1-C2 (intermediate complexity preferred)
+- Create ONE complete German sentence to translate
+- Sentence should be natural and contextually rich
+- Include cultural context or idiomatic expressions when relevant
+- Avoid clichés like "I go to the store" or "The weather is nice"
 
-@app.get("/panel")
-def panel():
-    return FileResponse("static/panel.html")
+OUTPUT FORMAT (exact structure):
+Translate this German sentence to English:
+[Your German sentence here]
 
+IMPORTANT: 
+- Output ONLY the task in the format above
+- Do NOT include English translation
+- Do NOT add explanations, tips, or additional context
+- Do NOT number the task""",
+        
+        'conversation': f"""Create a conversational German exercise.
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+TOPIC: {topic_context}
+SCENARIO: {random.choice(CREATIVE_SCENARIOS)}
+{dict_context}
+{history_context}
 
+REQUIREMENTS:
+- Level: A1-C2 (intermediate complexity preferred)
+- Create a realistic situation and a prompt requiring a German response
+- Use natural conversational language, not textbook phrases
+- Make the scenario engaging and memorable
 
-@app.get("/oauth/start")
-def oauth_start():
-    if not PIPEDRIVE_CLIENT_ID:
-        return JSONResponse({"error": "Missing PIPEDRIVE_CLIENT_ID env var"}, status_code=500)
-    state = secrets.token_urlsafe(32)
-    save_oauth_state(state)
-    auth_url = (
-        "https://oauth.pipedrive.com/oauth/authorize"
-        f"?client_id={PIPEDRIVE_CLIENT_ID}"
-        f"&redirect_uri={REDIRECT_URI}"
-        f"&response_type=code"
-        f"&state={state}"
-    )
-    return RedirectResponse(auth_url)
+OUTPUT FORMAT (exact structure):
+Situation: [2-3 sentence scenario description]
+Respond in German to: [Specific prompt or question]
 
+IMPORTANT:
+- Output ONLY the task in the format above
+- Do NOT include the English translation of the expected answer
+- Do NOT include sample responses or hints
+- Do NOT add explanations beyond the situation description""",
+        
+        'grammar': f"""Create a German grammar exercise.
 
-@app.get("/oauth/callback")
-def oauth_callback(request: Request):
-    code  = request.query_params.get("code")
-    state = request.query_params.get("state", "")
+TOPIC: {topic_context}
+{dict_context}
+{history_context}
 
-    if not state or not consume_oauth_state(state):
-        return JSONResponse({"error": "Invalid or expired state — please start again via /oauth/start."}, status_code=400)
-    if not code:
-        return JSONResponse({"error": "No authorisation code returned. User may have declined."}, status_code=400)
+REQUIREMENTS:
+- Level: A1-C2 (intermediate complexity preferred)
+- Focus on ONE specific grammar concept
+- Create 2-3 sentences testing this concept
+- Use engaging, memorable examples with context
+- Include clear instructions on what to do
 
-    client_secret = os.getenv("PIPEDRIVE_CLIENT_SECRET", "")
-    if not PIPEDRIVE_CLIENT_ID or not client_secret:
-        return JSONResponse({"error": "Missing PIPEDRIVE_CLIENT_ID or PIPEDRIVE_CLIENT_SECRET env var"}, status_code=500)
+OUTPUT FORMAT:
+[Clear instruction about what grammar to practice]
+[2-3 example sentences with blanks or items to correct]
 
-    r = requests.post(
-        "https://oauth.pipedrive.com/oauth/token",
-        data={
-            "grant_type":    "authorization_code",
-            "code":          code,
-            "redirect_uri":  REDIRECT_URI,
-            "client_id":     PIPEDRIVE_CLIENT_ID,
-            "client_secret": client_secret,
-        },
-        timeout=30,
-    )
-    if r.status_code != 200:
-        return JSONResponse({"error": "Token exchange failed", "status": r.status_code, "body": r.text}, status_code=400)
+IMPORTANT:
+- Output ONLY the task with clear instructions
+- Do NOT include the answers
+- Do NOT add explanatory notes or grammar rules
+- Make instructions specific (e.g., "Fill in the correct article" not "Practice articles")""",
+        
+        'vocabulary': f"""Create a German vocabulary exercise.
 
-    tokens        = r.json()
-    access_token  = tokens["access_token"]
-    refresh_token = tokens["refresh_token"]
-    expires_in    = tokens.get("expires_in", 3600)
+TOPIC: {topic_context}
+{dict_context}
+{history_context}
 
-    me = requests.get(
-        "https://api.pipedrive.com/v1/users/me",
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=30,
-    )
-    me.raise_for_status()
-    company_id = str(me.json()["data"]["company_id"])
+REQUIREMENTS:
+- Present exactly 3-4 German words or phrases
+- Include interesting, useful expressions (can include some lesser-known ones)
+- For each word provide: German word, English meaning, and one example sentence
+- Add brief cultural context if relevant
 
-    save_tokens(company_id, access_token, refresh_token, int(expires_in))
-    return {"ok": True, "company_id": company_id, "note": "OAuth complete. Tokens saved."}
+OUTPUT FORMAT:
+Learn these German words:
 
+1. [German word/phrase] - [English meaning]
+   Example: [German sentence using the word]
+   [Optional: Brief cultural note]
 
-@app.post("/api/populate")
-async def api_populate(payload: dict):
-    resource   = payload.get("resource")
-    record_id  = str(payload.get("id"))
-    company_id = str(payload.get("companyId"))
+2. [Next word...]
 
-    # Normalise both spellings Pipedrive may send
-    if resource in ("organisation", "organization"):
-        resource = "organization"
+IMPORTANT:
+- Output ONLY the vocabulary list in the format above
+- Keep cultural notes brief (one sentence max)
+- Use natural, authentic German in examples""",
+        
+        'dictionary_practice': f"""Create an exercise using the user's dictionary words.
 
-    if resource not in ("deal", "person", "organization"):
-        return JSONResponse({"error": "Unsupported resource"}, status_code=400)
+WORDS TO PRACTICE:
+{dict_context}
+{history_context}
 
-    if resource == "person":
-        return JSONResponse(
-            {"error": "Person enrichment is not available. Only Organisation and Deal fields can be populated."},
-            status_code=400,
+REQUIREMENTS:
+- Create ONE of these exercise types:
+  a) A paragraph with blanks to fill using the dictionary words
+  b) Sentences to translate that naturally include the words
+  c) A short dialogue using the words
+- Make the context natural and interesting
+- Level: A1-C2 (match the complexity of the words)
+
+OUTPUT FORMAT:
+[Clear instruction]
+[Exercise content]
+
+IMPORTANT:
+- Output ONLY the task
+- Do NOT include answers
+- Do NOT add vocabulary definitions (user already knows these words)
+- Ensure all dictionary words are genuinely needed for the exercise""",
+
+        'listening_practice': f"""Create a German listening comprehension exercise.
+
+TOPIC: {topic_context}
+{dict_context}
+{history_context}
+
+REQUIREMENTS:
+- Level: A1-C2 (intermediate complexity preferred)
+- Create a short dialogue or monologue (3-5 sentences) in German
+- Include authentic conversational elements (fillers, contractions, colloquialisms)
+- Provide 2-3 comprehension questions in English
+- Questions should test understanding of main ideas, details, or implied meaning
+
+OUTPUT FORMAT (exact structure):
+Listen to this German text:
+[German dialogue or monologue here - 3-5 sentences]
+
+Answer these questions:
+1. [Question in English]
+2. [Question in English]
+3. [Question in English]
+
+IMPORTANT:
+- Output ONLY the task in the format above
+- Do NOT include answers to the questions
+- Do NOT provide translations of the German text
+- Use natural, conversational German with realistic speech patterns
+- Questions should encourage active listening and comprehension""",
+
+        'creative_writing': f"""Create a German creative writing exercise.
+
+TOPIC: {topic_context}
+CREATIVE PROMPT: {random.choice(CREATIVE_WRITING_PROMPTS)}
+{dict_context}
+{history_context}
+
+REQUIREMENTS:
+- Level: A2-C2 (encourage creative expression)
+- Provide an engaging creative prompt or story starter
+- Ask for a 5-8 sentence response in German
+- Encourage use of specific grammar structures or vocabulary
+- Make it fun and imaginative
+
+OUTPUT FORMAT (exact structure):
+Creative Writing Challenge:
+[Engaging scenario or prompt - 2-3 sentences]
+
+Write 5-8 sentences in German about:
+[Specific writing task]
+
+Try to include: [2-3 grammar or vocabulary suggestions]
+
+IMPORTANT:
+- Output ONLY the task in the format above
+- Do NOT provide a sample response
+- Do NOT include translations
+- Make prompts imaginative and engaging
+- Encourage personal expression and creativity""",
+
+        'error_correction': f"""Create a German error detection and correction exercise.
+
+TOPIC: {topic_context}
+{dict_context}
+{history_context}
+
+REQUIREMENTS:
+- Level: A2-C2 (intermediate to advanced)
+- Create 3-4 German sentences with deliberate mistakes
+- Include variety of error types: grammar (cases, verb conjugation, word order), vocabulary misuse, article errors, preposition errors
+- Errors should be realistic (common learner mistakes)
+- Make sentences contextually connected (tell a mini-story)
+
+OUTPUT FORMAT (exact structure):
+Error Detective Challenge:
+Find and correct the mistakes in these German sentences:
+
+1. [German sentence with error]
+2. [German sentence with error]
+3. [German sentence with error]
+4. [German sentence with error - optional]
+
+Hint: Look for errors in [general hints like "articles, verb conjugation, and word order"]
+
+IMPORTANT:
+- Output ONLY the task in the format above
+- Do NOT mark where the errors are
+- Do NOT provide the corrected versions
+- Do NOT explain the errors
+- Errors should be realistic and educational
+- Sentences should form a coherent context or mini-story"""
+    }
+    
+    # Select appropriate prompt
+    if dictionary_words and len(dictionary_words) > 0:
+        selected_prompt = prompts.get('dictionary_practice', prompts['translation'])
+    else:
+        selected_prompt = prompts.get(exercise_type, prompts['translation'])
+    
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "You are a German language exercise creator. Generate exercises EXACTLY as specified in the format provided. Do not add extra explanations, answers, or formatting beyond what is requested. Be creative with content but strict with format."
+                },
+                {"role": "user", "content": selected_prompt}
+            ],
+            max_tokens=350,
+            temperature=0.8
         )
+        
+        question = response.choices[0].message.content.strip()
+        
+        # Store in history
+        exercise_history.append(question[:100])
+        if len(exercise_history) > MAX_HISTORY:
+            exercise_history.pop(0)
+        
+        return question
+        
+    except Exception as e:
+        print(f"Error generating exercise: {e}")
+        return f"Error generating exercise: {str(e)}"
 
-    access_token = get_valid_token(company_id)
-    if not access_token:
-        return JSONResponse({"error": "Not connected or token expired. Re-authenticate via /oauth/start."}, status_code=401)
 
-    headers      = {"Authorization": f"Bearer {access_token}"}
-    base         = "https://api.pipedrive.com/v1"
+def check_answer(question, answer, exercise_type):
+    """Check answers with structured, helpful feedback"""
+    
+    if not openai.api_key:
+        return "Error: OpenAI API key not configured."
+    
+    prompts = {
+        'translation': f"""Evaluate this German translation exercise.
 
-    # ── Deal ─────────────────────────────────────────────────────────────────
-    if resource == "deal":
-        r = requests.get(f"{base}/deals/{record_id}", headers=headers, timeout=30)
-        if r.status_code != 200:
-            return JSONResponse({"error": "Failed to fetch deal", "body": r.text}, status_code=400)
-        data       = r.json().get("data", {})
-        target_key = DEAL_FIELDS["deal_context"]["key"]
+EXERCISE: {question}
+STUDENT'S ANSWER: {answer}
 
-        if not is_empty(data.get(target_key)):
-            return {"ok": True, "message": "Deal context already filled. Nothing to do."}
+REQUIREMENTS:
+Provide feedback in English with this structure:
 
-        # Fetch notes and activities to enrich the summary (optionally date-filtered)
-        date_from  = str(payload.get("date_from") or "")[:10]
-        date_to    = str(payload.get("date_to")   or "")[:10]
-        notes      = fetch_deal_notes(record_id, headers, date_from, date_to)
-        activities = fetch_deal_activities(record_id, headers, date_from, date_to)
+1. ASSESSMENT: [Excellent/Good/Needs Improvement]
 
-        try:
-            ai_text = ai_write_deal_summary(data, notes, activities)
-        except Exception as e:
-            return JSONResponse({"error": "AI generation failed", "details": str(e)}, status_code=500)
+2. EVALUATION:
+   - What is correct: [Be specific]
+   - What needs correction: [If any errors exist]
+   - Correct answer: [Only if student's answer was incorrect]
 
-        u = requests.put(f"{base}/deals/{record_id}", json={target_key: ai_text}, headers=headers, timeout=30)
-        if u.status_code != 200:
-            return JSONResponse({"error": "Failed to update deal", "body": u.text}, status_code=400)
+3. EXPLANATION: [Why the correct answer works, brief grammar/vocabulary notes]
 
-        has_history = bool(notes or activities)
-        source_note = " (based on notes & activity history)" if has_history else " (no history found — used deal details only)"
+4. TIP: [One helpful mnemonic or learning tip]
+
+Be encouraging but honest. Focus on learning, not just praise.""",
+            
+        'conversation': f"""Evaluate this German conversation response.
+
+SCENARIO: {question}
+STUDENT'S RESPONSE: {answer}
+
+REQUIREMENTS:
+Provide feedback in English with this structure:
+
+1. ASSESSMENT: [Excellent/Good/Needs Improvement]
+
+2. EVALUATION:
+   - Appropriateness: [Is the response culturally and contextually appropriate?]
+   - Grammar: [Identify any errors and correct them]
+   - Vocabulary: [Comment on word choice]
+   - Naturalness: [Does it sound like natural German?]
+
+3. NATIVE ALTERNATIVE: [Suggest how a native speaker might say this]
+
+4. TIP: [One practical improvement for future responses]
+
+Be constructive and supportive.""",
+        
+        'grammar': f"""Evaluate this German grammar exercise.
+
+EXERCISE: {question}
+STUDENT'S ANSWER: {answer}
+
+REQUIREMENTS:
+Provide feedback in English with this structure:
+
+1. ASSESSMENT: [Excellent/Good/Needs Improvement]
+
+2. ANALYSIS:
+   - Correct elements: [What they got right]
+   - Errors: [What needs correction, if any]
+   - Correct answer: [Provide if incorrect]
+
+3. GRAMMAR EXPLANATION: [Explain the rule briefly and clearly]
+
+4. MEMORY TRICK: [Provide a helpful mnemonic or pattern to remember]
+
+Be clear and educational.""",
+        
+        'vocabulary': f"""Evaluate this German vocabulary exercise.
+
+EXERCISE: {question}
+STUDENT'S ANSWERS: {answer}
+
+REQUIREMENTS:
+Provide feedback in English with this structure:
+
+1. ASSESSMENT: [Score like "3/4 correct" or overall evaluation]
+
+2. REVIEW:
+   - Correct answers: [List them with praise]
+   - Incorrect answers: [Show correct form with explanation]
+
+3. ADDITIONAL INFO: [Related words, usage notes, or cultural context]
+
+4. TIP: [Memory technique or learning suggestion]
+
+Be encouraging and informative.""",
+
+        'listening_practice': f"""Evaluate answers to this German listening comprehension exercise.
+
+EXERCISE: {question}
+STUDENT'S ANSWERS: {answer}
+
+REQUIREMENTS:
+Provide feedback in English with this structure:
+
+1. ASSESSMENT: [Score like "2/3 correct" or overall evaluation]
+
+2. ANSWER REVIEW:
+   - Question 1: [Correct/Incorrect - brief explanation]
+   - Question 2: [Correct/Incorrect - brief explanation]
+   - Question 3: [Correct/Incorrect - brief explanation]
+
+3. COMPREHENSION ANALYSIS:
+   - What the student understood well
+   - What was missed or misunderstood
+   - Key vocabulary or phrases that were important
+
+4. LISTENING TIP: [Specific advice for improving German listening skills]
+
+Be encouraging and focus on comprehension strategies.""",
+
+        'creative_writing': f"""Evaluate this German creative writing exercise.
+
+EXERCISE: {question}
+STUDENT'S WRITING: {answer}
+
+REQUIREMENTS:
+Provide feedback in English with this structure:
+
+1. ASSESSMENT: [Excellent/Good/Needs Improvement]
+
+2. CONTENT & CREATIVITY:
+   - How well the prompt was addressed
+   - Creativity and originality of ideas
+   - Engagement and interest level
+
+3. LANGUAGE QUALITY:
+   - Grammar accuracy: [Note any errors]
+   - Vocabulary usage: [Richness, appropriateness]
+   - Sentence structure: [Variety, complexity]
+   - Natural flow: [Does it sound natural?]
+
+4. CORRECTIONS: [List any grammar/vocabulary errors with corrections]
+
+5. SUGGESTIONS: [2-3 specific ways to enhance the writing]
+
+6. ENCOURAGEMENT: [Positive note about what worked well]
+
+Be supportive and constructive. Focus on both content and language.""",
+
+        'error_correction': f"""Evaluate this German error correction exercise.
+
+ORIGINAL EXERCISE: {question}
+STUDENT'S CORRECTIONS: {answer}
+
+REQUIREMENTS:
+Provide feedback in English with this structure:
+
+1. ASSESSMENT: [Score like "3/4 errors found and corrected"]
+
+2. ERROR-BY-ERROR REVIEW:
+   Sentence 1: [Whether they found/corrected the error + correct version]
+   Sentence 2: [Whether they found/corrected the error + correct version]
+   Sentence 3: [Whether they found/corrected the error + correct version]
+   Sentence 4: [Whether they found/corrected the error + correct version - if applicable]
+
+3. EXPLANATIONS:
+   - Explain each error type (why it was wrong)
+   - Provide the grammar rule or principle
+   - Mention if they missed any errors
+
+4. LEARNING POINT: [Key takeaway about common German mistakes]
+
+Be clear and educational. Help them understand WHY errors occur."""
+    }
+    
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "You are a German language teacher providing structured, helpful feedback. Follow the format exactly. Be supportive but accurate—don't say something is correct if it isn't. Provide clear explanations that help students understand and improve."
+                },
+                {"role": "user", "content": prompts.get(exercise_type, prompts['translation'])}
+            ],
+            max_tokens=450,
+            temperature=0.7
+        )
+        
+        return response.choices[0].message.content.strip()
+        
+    except Exception as e:
+        print(f"Error checking answer: {e}")
+        return f"Error checking answer: {str(e)}"
+
+
+def analyze_word(word, context):
+    """Analyze a word with detailed information"""
+    
+    if not openai.api_key:
         return {
-            "ok":           True,
-            "message":      f"Done. Deal context populated{source_note}.",
-            "filled_website": ["Deal Context"],
-            "filled_web":     [],
-            "not_found":      [],
+            'german': word,
+            'english': 'API key not configured',
+            'russian': 'Ключ API не настроен',
+            'type': 'other',
+            'category': 'vocabulary',
+            'explanation': 'Please set OPENAI_API_KEY',
+            'examples': []
+        }
+    
+    prompt = f"""
+        Analyze ONLY the following German word or phrase – do NOT analyze or include any other word from the context, unless it is part of the selected word itself.
+       
+         Your highest rule: 
+        → If the word is a verb in any conjugated, participle, or modal form, 
+        you MUST replace it with its infinitive form in the [German:] line.
+        Do not ever keep the conjugated form (e.g., 'konnte', 'hatte', 'ging', 'schwimmt').
+        The [German:] field must always contain the infinitive form (e.g., 'können', 'haben', 'gehen', 'schwimmen').
+
+        If the word is a noun – use singular with article and plural in parentheses (e.g., der Tisch (die Tische)).
+        If the word is an adjective – use base form (e.g., schön).
+        If the word is an adverb – use base form (e.g., gern).
+        If it's a participle used adjectivally – use adjective base (e.g., gefragt → gefragt).
+        Never automatically create a noun from a verb or adjective.
+        Analyze only the provided word, ignore others in the sentence.
+
+        Word/Phrase: "{word}"
+        Context (for reference only): {context}
+
+        Provide the information in this EXACT format (each field on a new line):
+
+        German: [see detailed type rules below]
+        English: [English translation – accurate and specific]
+        Russian: [Russian translation in Cyrillic – natural and precise]
+        Type: [verb / noun / adjective / adverb / phrase / other]
+        Category: [conversation / grammar / vocabulary]
+        Explanation: [2–3 sentences – see requirements below]
+        Example1: [Complete sentence in German] – [English translation]
+        Example2: [Complete sentence in German] – [English translation]
+        Example3: [Complete sentence in German] – [English translation]
+
+        ---
+
+        ### DETAILED RULES FOR "German" FIELD
+
+        [1) IF IT IS A NOUN:]
+        - Format: article + singular (plural), e.g., *das Haus (die Häuser)*, *der Tisch (die Tische)*.
+        - Always keep nouns as nouns.
+        - Normalize plural and declined forms.
+        - Never convert nouns into verbs, adjectives, or adverbs.
+        - Only create a noun from a verb/adjective root if the input is **capitalized** and used nominally (e.g., *das Gesagte*).
+        - Ensure gender and plural forms are correct and natural.
+
+        [2) IF IT IS A VERB:]
+        - Always use infinitive form, e.g., *gehen*, *sprechen*, *haben*, *sein*, *können*.
+        - Convert conjugated and participial forms:
+        - *hatte / gehabt → haben*
+        - *war / gewesen → sein*
+        - *konnte / gekonnt → können*
+        - *brachte / gebracht → bringen*
+        - *ging / gegangen → gehen*
+        - If it is reflexive → include "sich" + governed case, e.g., *sich erinnern an + Akkusativ*.
+        - If it has a preposition → show infinitive + preposition + case, e.g., *warten auf + Akkusativ*.
+        - If it is separable → show infinitive (present separation), e.g., *ankommen (kommt an)*.
+        - Never create nouns automatically from verbs (e.g., *der Sprecher*, *das Gefragt*).
+
+        [3) IF IT IS A PAST PARTICIPLE OR PARTICIPLE-FORM:]
+        - Default: map to infinitive (e.g., *gefragt → fragen*, *getroffen → treffen*).
+        - Treat as adjective only if context clearly shows adjectival use (*das gefragte Buch → gefragt*).
+        - Treat as noun only if capitalized and clearly nominal (*das Gesagte*).
+
+        [4) IF IT IS AN ADJECTIVE:]
+        - Use base form, e.g., *schön*, *gut*.
+        - Normalize comparative/superlative (*schöner*, *am schönsten → schön*).
+        - Treat adjectival participles as adjectives derived from verbs (e.g., *sprechender Mann → sprechend*).
+        - Create noun only if explicitly nominalized (*das Gesagte*).
+
+        [5) IF IT IS AN ADVERB:]
+        - Keep as adverb, e.g., *gern*, *heute*.
+        - Do not convert into adjectives, verbs, or nouns.
+
+        [6) IF IT IS A PHRASE / EXPRESSION:]
+        - Keep base or infinitive form, indicate governed case if applicable.
+        - Examples: *Lust haben auf + Akkusativ*, *es gibt + Akkusativ*.
+        - Do not reduce phrase to a single word.
+
+        ---
+
+        ### GENERAL RULES (ALWAYS APPLY)
+        - Always return verbs in **infinitive** form.
+        - Always return nouns in **singular with plural in parentheses**.
+        - Never reproduce the conjugated or declined form from the sentence.
+        - Never analyze or include other words (e.g., nouns like "Socke") unless part of the same phrase.
+        - Context is for meaning only, not for morphology.
+        - Analyze ONLY the provided word. Ignore other nouns, verbs, or words in the sentence.
+        - Preserve original part of speech; never switch automatically.
+        - Normalize verbs → infinitive, adjectives → base, adverbs → base, nouns → singular (with plural).
+        - Always ensure gender, plural, separability, and case governance are correct.
+        - For ambiguous inputs, assume the most common POS and add note:
+        "POS ambiguous – defaulted to [type]. Provide a sentence to override."
+
+        ---
+
+        ### EXPLANATION FIELD FORMAT
+        [2–3 sentences covering:]
+        - Primary meaning and usage.
+        - Grammar details (gender, separability, case).
+        - Common mistakes, nuances, or contextual tips.
+
+        ---
+
+        ### FORMATTING RULES
+        - Always include articles for nouns.
+        - Always show plural in parentheses for nouns.
+        - Always specify case for prepositional or reflexive verbs.
+        - Use " – " (em dash with spaces) between German and English in examples.
+        - Do NOT add other words from the sentence.
+        - Be concise, grammatical, and consistent.
+
+        """
+    
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a German language expert providing precise, well-formatted analysis."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=500,
+            temperature=0.3
+        )
+        
+        content = response.choices[0].message.content.strip()
+        print(f"Analyzing '{word}':\n{content}\n")
+        
+        word_data = {
+            'german': '',
+            'english': '',
+            'russian': '',
+            'type': 'other',
+            'category': 'vocabulary',
+            'explanation': '',
+            'examples': []
+        }
+        
+        lines = content.split('\n')
+        examples = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            line_lower = line.lower()
+            
+            if line_lower.startswith('german:'):
+                word_data['german'] = line.split(':', 1)[1].strip()
+            elif line_lower.startswith('english:'):
+                word_data['english'] = line.split(':', 1)[1].strip()
+            elif line_lower.startswith('russian:'):
+                word_data['russian'] = line.split(':', 1)[1].strip()
+            elif line_lower.startswith('type:'):
+                type_val = line.split(':', 1)[1].strip().lower()
+                if type_val in ['verb', 'noun', 'adjective', 'adverb', 'phrase', 'other']:
+                    word_data['type'] = type_val
+            elif line_lower.startswith('category:'):
+                cat_val = line.split(':', 1)[1].strip().lower()
+                if cat_val in ['conversation', 'grammar', 'vocabulary']:
+                    word_data['category'] = cat_val
+            elif line_lower.startswith('explanation:'):
+                word_data['explanation'] = line.split(':', 1)[1].strip()
+            elif line_lower.startswith('example'):
+                example_text = line.split(':', 1)[1].strip() if ':' in line else line
+                if example_text:
+                    examples.append(example_text)
+        
+        word_data['examples'] = examples
+        
+        if not word_data['english']:
+            raise ValueError("Failed to extract English translation")
+        
+        return word_data
+        
+    except Exception as e:
+        print(f"Error analyzing word: {e}")
+        return {
+            'german': word,
+            'english': f'Error: {str(e)[:50]}',
+            'russian': 'Ошибка обработки',
+            'type': 'other',
+            'category': 'vocabulary',
+            'explanation': f'Analysis failed: {str(e)}',
+            'examples': []
         }
 
-    # ── Organisation ─────────────────────────────────────────────────────────
-    r = requests.get(f"{base}/organizations/{record_id}", headers=headers, timeout=30)
-    if r.status_code != 200:
-        return JSONResponse({
-            "error": f"Pipedrive returned HTTP {r.status_code} when fetching the organisation. "
-                      "If this is a 401, your token has expired - re-authenticate via /oauth/start.",
-            "body": r.text[:300],
-        }, status_code=400)
+# ==================== MONGODB API ROUTES (Updated with auth) ====================
 
-    data = r.json().get("data", {})
-
-    # Which fields need filling?
-    fields_to_fill = [
-        name for name, info in ORG_FIELDS.items()
-        if is_empty(data.get(info["key"]))
-    ]
-
-    if not fields_to_fill:
-        return {"ok": True, "message": "All fields already filled. Nothing to do."}
-
-    # Get website URL and domain
-    website_url = data.get("website") or ""
-    if isinstance(website_url, list):
-        website_url = website_url[0].get("value", "") if website_url else ""
-
-    if not website_url:
-        return JSONResponse(
-            {"error": "No website found on this organisation record. Please add one first."},
-            status_code=400,
-        )
-
-    # Extract domain for anchoring web searches (e.g. "eaces.de")
-    domain_match = re.search(r"https?://(?:www\.)?([^/]+)", website_url)
-    domain = domain_match.group(1) if domain_match else website_url
-
-    # Fetch industry options if needed
-    industry_options = []
-    if "industry" in fields_to_fill:
-        industry_options = get_industry_options(access_token)
-
-    org_name = data.get("name", "")
-
-    # ── PASS 1: extract from website ─────────────────────────────────────────
-    website_text = fetch_website_text(website_url)
-    if not website_text or len(website_text) < 100:
-        return JSONResponse(
-            {"error": f"Could not read content from {website_url}. The site may block requests or require JavaScript."},
-            status_code=400,
-        )
-
+@app.route('/api/dictionary', methods=['GET'])
+@login_required
+def get_dictionary():
+    """Get all dictionary words for current user"""
     try:
-        extracted = ai_extract_from_website(
-            name=org_name,
-            website_url=website_url,
-            website_text=website_text,
-            fields=fields_to_fill,
-            industry_options=industry_options,
-        )
+        if db is None:
+            return jsonify({"error": "Database not connected"}), 500
+        
+        user_id = get_current_user_id()
+        words = list(dictionary_collection.find({'user_id': user_id}))
+        
+        for word in words:
+            word['_id'] = str(word['_id'])
+            word['id'] = word.get('id', str(word['_id']))
+        
+        return jsonify(words), 200
+        
     except Exception as e:
-        return JSONResponse({"error": "AI extraction (website) failed", "details": str(e)}, status_code=500)
+        print(f"Error getting dictionary: {e}")
+        return jsonify({"error": str(e)}), 500
 
-    # Which fields are still missing after pass 1?
-    still_missing = [
-        f for f in fields_to_fill
-        if extracted.get(f) is None and ORG_FIELDS[f].get("web_searchable")
-    ]
+@app.route('/api/dictionary', methods=['POST'])
+@login_required
+def add_to_dictionary():
+    """Add a word to dictionary"""
+    try:
+        if db is None:
+            return jsonify({"error": "Database not connected"}), 500
+        
+        data = request.json
+        user_id = get_current_user_id()
+        
+        word_data = {
+            'user_id': user_id,
+            'german': data.get('german', ''),
+            'english': data.get('english', ''),
+            'russian': data.get('russian', ''),
+            'type': data.get('type', 'other'),
+            'category': data.get('category', 'vocabulary'),
+            'explanation': data.get('explanation', ''),
+            'examples': data.get('examples', []),
+            'timestamp': datetime.now().isoformat(),
+            'id': data.get('id', int(datetime.now().timestamp() * 1000))
+        }
+        
+        result = dictionary_collection.insert_one(word_data)
+        word_data['_id'] = str(result.inserted_id)
+        
+        return jsonify(word_data), 201
+        
+    except Exception as e:
+        print(f"Error adding to dictionary: {e}")
+        return jsonify({"error": str(e)}), 500
 
-    # ── PASS 2: web search for remaining fields ───────────────────────────────
-    web_extracted = {}
-    if still_missing:
+@app.route('/api/dictionary/<word_id>', methods=['PUT'])
+@login_required
+def update_dictionary_word(word_id):
+    """Update a dictionary word"""
+    try:
+        if db is None:
+            return jsonify({"error": "Database not connected"}), 500
+        
+        data = request.json
+        user_id = get_current_user_id()
+        
+        query = {'user_id': user_id}
         try:
-            web_extracted = ai_extract_from_web(
-                name=org_name,
-                website_url=website_url,
-                domain=domain,
-                fields=still_missing,
-                industry_options=industry_options,
-            )
-        except Exception:
-            pass  # web search is best-effort — don't fail the whole request
-
-    # Merge: website data takes priority, web search fills the gaps
-    for f in still_missing:
-        if web_extracted.get(f) is not None and extracted.get(f) is None:
-            extracted[f] = web_extracted[f]
-
-    # ── Build Pipedrive update payload ────────────────────────────────────────
-    update_payload = {}
-    filled_website = []
-    filled_web     = []
-    not_found      = []
-
-    for field_name in fields_to_fill:
-        raw_value = extracted.get(field_name)
-        if raw_value is None:
-            not_found.append(ORG_FIELDS[field_name]["label"])
-            continue
-
-        formatted = format_value_for_pipedrive(
-            field_name,
-            ORG_FIELDS[field_name]["type"],
-            raw_value,
-            industry_options,
-        )
-        if formatted is None:
-            not_found.append(ORG_FIELDS[field_name]["label"])
-            continue
-
-        update_payload[ORG_FIELDS[field_name]["key"]] = formatted
-        label = ORG_FIELDS[field_name]["label"]
-        if field_name in still_missing and web_extracted.get(field_name) is not None:
-            filled_web.append(label)
+            query['id'] = int(word_id)
+        except:
+            query['_id'] = ObjectId(word_id)
+        
+        update_data = {
+            'german': data.get('german'),
+            'english': data.get('english'),
+            'russian': data.get('russian'),
+            'type': data.get('type'),
+            'category': data.get('category'),
+            'explanation': data.get('explanation', ''),
+            'examples': data.get('examples', [])
+        }
+        
+        result = dictionary_collection.update_one(query, {'$set': update_data})
+        
+        if result.modified_count > 0:
+            return jsonify({"success": True}), 200
         else:
-            filled_website.append(label)
-
-    if not update_payload:
-        return {"ok": True, "message": f"No data found for: {', '.join(not_found)}."}
-
-    # Write to Pipedrive
-    u = requests.put(
-        f"{base}/organizations/{record_id}",
-        json=update_payload,
-        headers=headers,
-        timeout=30,
-    )
-    if u.status_code != 200:
-        return JSONResponse({"error": "Failed to update organisation", "body": u.text}, status_code=400)
-
-    # Build a clear, informative message
-    parts = []
-    if filled_website:
-        parts.append(f"From website: {', '.join(filled_website)}")
-    if filled_web:
-        parts.append(f"From web search: {', '.join(filled_web)}")
-    if not_found:
-        parts.append(f"Not found: {', '.join(not_found)}")
-
-    total = len(filled_website) + len(filled_web)
-    return {
-        "ok": True,
-        "message": f"{total} field{'s' if total != 1 else ''} populated. " + ". ".join(parts) + ".",
-        "filled_website": filled_website,
-        "filled_web":     filled_web,
-        "not_found":      not_found,
-    }
-
-
-@app.post("/api/chat")
-async def api_chat(payload: dict):
-    """
-    Lightweight chat proxy. Receives:
-      - messages: list of {role, content} (full history)
-      - context:  optional deal/org context string prepended as system context
-      - companyId: for auth check
-    Returns: {reply: str}
-    """
-    company_id = str(payload.get("companyId", ""))
-    messages   = payload.get("messages", [])
-    context    = payload.get("context", "").strip()
-
-    if not messages:
-        return JSONResponse({"error": "No messages provided"}, status_code=400)
-
-    # Optional: verify company has a valid token (soft check, don't block chat)
-    tokens = load_tokens(company_id) if company_id else None
-
-    system_content = (
-        "You are a helpful sales assistant embedded inside Pipedrive CRM. "
-        "You help sales reps understand their deals, draft emails, prepare for calls, "
-        "and answer questions about contacts and organisations. "
-        "Be concise and practical. Use plain text unless the user asks for formatting."
-    )
-    if context:
-        system_content += f"\n\n== CURRENT RECORD CONTEXT ==\n{context}"
-
-    try:
-        resp = openai_client.responses.create(
-            model="gpt-4.1-mini",
-            input=[
-                {"role": "system", "content": system_content},
-                *messages,
-            ],
-        )
-        return {"reply": resp.output_text.strip()}
+            return jsonify({"error": "Word not found"}), 404
+            
     except Exception as e:
-        return JSONResponse({"error": "AI request failed", "details": str(e)}, status_code=500)
+        print(f"Error updating dictionary: {e}")
+        return jsonify({"error": str(e)}), 500
 
-
-@app.post("/api/context")
-async def api_context(payload: dict):
-    """
-    Returns a plain-text context string for the current record.
-    Used by the chat to ground conversations in real CRM data.
-    """
-    resource   = payload.get("resource", "")
-    record_id  = str(payload.get("id", ""))
-    company_id = str(payload.get("companyId", ""))
-
-    if resource in ("organisation", "organization"):
-        resource = "organization"
-
-    access_token = get_valid_token(company_id)
-    if not access_token:
-        return {"context": ""}
-
-    headers = {"Authorization": f"Bearer {access_token}"}
-    base    = "https://api.pipedrive.com/v1"
-    lines   = []
-
+@app.route('/api/dictionary/<word_id>', methods=['DELETE'])
+@login_required
+def delete_dictionary_word(word_id):
+    """Delete a dictionary word"""
     try:
-        if resource == "deal":
-            r = requests.get(f"{base}/deals/{record_id}", headers=headers, timeout=15)
-            if r.status_code == 200:
-                d = r.json().get("data", {})
-                lines.append(f"Record type: Deal")
-                if d.get("title"):       lines.append(f"Title: {d['title']}")
-                if d.get("value"):       lines.append(f"Value: {d['value']} {d.get('currency','')}")
-                if d.get("probability"): lines.append(f"Win probability: {d['probability']}%")
-                close = d.get("close_time") or d.get("expected_close_date")
-                if close: lines.append(f"Expected close: {str(close)[:10]}")
-                if d.get("status"):      lines.append(f"Status: {d['status']}")
-                stage = d.get("stage_id")
-                if isinstance(stage, dict): lines.append(f"Stage: {stage.get('name','')}")
-                org = d.get("org_id")
-                if isinstance(org, dict): lines.append(f"Organisation: {org.get('name','')}")
-                person = d.get("person_id")
-                if isinstance(person, dict): lines.append(f"Contact: {person.get('name','')}")
-                owner = d.get("owner_id")
-                if isinstance(owner, dict): lines.append(f"Owner: {owner.get('name','')}")
-                # Custom deal context field
-                ctx_key = DEAL_FIELDS["deal_context"]["key"]
-                if d.get(ctx_key): lines.append(f"\nDeal context:\n{d[ctx_key]}")
-                # Recent notes
-                notes = fetch_deal_notes(record_id, headers)
-                nb = format_notes_block(notes)
-                if nb: lines.append("\n" + nb)
-                # Recent activities
-                acts = fetch_deal_activities(record_id, headers)
-                ab = format_activities_block(acts)
-                if ab: lines.append("\n" + ab)
-
-        elif resource == "organization":
-            r = requests.get(f"{base}/organizations/{record_id}", headers=headers, timeout=15)
-            if r.status_code == 200:
-                d = r.json().get("data", {})
-                lines.append(f"Record type: Organisation")
-                if d.get("name"):    lines.append(f"Name: {d['name']}")
-                if d.get("address"): lines.append(f"Address: {d['address']}")
-                website = d.get("website") or ""
-                if isinstance(website, list): website = website[0].get("value","") if website else ""
-                if website: lines.append(f"Website: {website}")
-                # Custom fields
-                for fname, finfo in ORG_FIELDS.items():
-                    val = d.get(finfo["key"])
-                    if val and fname not in ("address",):
-                        if isinstance(val, list):
-                            val = ", ".join(v.get("value","") for v in val if isinstance(v,dict))
-                        if val: lines.append(f"{finfo['label']}: {val}")
-    except Exception:
-        pass
-
-    return {"context": "\n".join(lines)}
-
-
-@app.post("/api/chat")
-async def api_chat(payload: dict):
-    """
-    Chat proxy. Receives:
-      - messages:  [{role, content}]  full conversation history
-      - context:   optional CRM context string prepended as system context
-      - companyId: for logging/auth
-    Returns: {reply: str}
-    """
-    messages   = payload.get("messages", [])
-    context    = (payload.get("context") or "").strip()
-    company_id = str(payload.get("companyId", ""))
-
-    if not messages:
-        return JSONResponse({"error": "No messages provided"}, status_code=400)
-
-    system = (
-        "You are a helpful sales assistant embedded inside Pipedrive CRM. "
-        "You help sales reps understand their deals and organisations, draft emails, "
-        "prepare for calls, and answer questions. "
-        "Be concise and practical. Use plain text unless the user asks for formatting. "
-        "When drafting emails, write the full email including a subject line."
-    )
-    if context:
-        system += f"\n\n== CURRENT RECORD ==\n{context}"
-
-    try:
-        resp = openai_client.responses.create(
-            model="gpt-4.1-mini",
-            input=[
-                {"role": "system", "content": system},
-                *messages,
-            ],
-        )
-        return {"reply": resp.output_text.strip()}
+        if db is None:
+            return jsonify({"error": "Database not connected"}), 500
+        
+        user_id = get_current_user_id()
+        
+        query = {'user_id': user_id}
+        try:
+            query['id'] = int(word_id)
+        except:
+            query['_id'] = ObjectId(word_id)
+        
+        result = dictionary_collection.delete_one(query)
+        
+        if result.deleted_count > 0:
+            return jsonify({"success": True}), 200
+        else:
+            return jsonify({"error": "Word not found"}), 404
+            
     except Exception as e:
-        return JSONResponse({"error": "AI request failed", "details": str(e)}, status_code=500)
+        print(f"Error deleting from dictionary: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/dictionary/sync', methods=['POST'])
+@login_required
+def sync_dictionary():
+    """Sync local dictionary with server (merge)"""
+    try:
+        if db is None:
+            return jsonify({"error": "Database not connected"}), 500
+        
+        data = request.json
+        local_words = data.get('words', [])
+        user_id = get_current_user_id()
+        
+        server_words = list(dictionary_collection.find({'user_id': user_id}))
+        server_germans = {w['german']: w for w in server_words}
+        
+        added_count = 0
+        
+        for word in local_words:
+            if word['german'] not in server_germans:
+                word_data = {
+                    'user_id': user_id,
+                    'german': word['german'],
+                    'english': word['english'],
+                    'russian': word['russian'],
+                    'type': word['type'],
+                    'category': word['category'],
+                    'explanation': word.get('explanation', ''),
+                    'examples': word.get('examples', []),
+                    'timestamp': word.get('timestamp', datetime.now().isoformat()),
+                    'id': word.get('id', int(datetime.now().timestamp() * 1000))
+                }
+                dictionary_collection.insert_one(word_data)
+                added_count += 1
+        
+        all_words = list(dictionary_collection.find({'user_id': user_id}))
+        for word in all_words:
+            word['_id'] = str(word['_id'])
+            word['id'] = word.get('id', str(word['_id']))
+        
+        return jsonify({
+            "words": all_words,
+            "added_count": added_count,
+            "total_count": len(all_words)
+        }), 200
+        
+    except Exception as e:
+        print(f"Error syncing dictionary: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/log', methods=['GET'])
+@login_required
+def get_log():
+    """Get learning log"""
+    try:
+        if db is None:
+            return jsonify({"error": "Database not connected"}), 500
+        
+        user_id = get_current_user_id()
+        logs = list(log_collection.find({'user_id': user_id}).sort('timestamp', -1).limit(100))
+        
+        for log in logs:
+            log['_id'] = str(log['_id'])
+        
+        return jsonify(logs), 200
+        
+    except Exception as e:
+        print(f"Error getting log: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/log', methods=['POST'])
+@login_required
+def add_to_log():
+    """Add entry to learning log"""
+    try:
+        if db is None:
+            return jsonify({"error": "Database not connected"}), 500
+        
+        data = request.json
+        user_id = get_current_user_id()
+        
+        log_entry = {
+            'user_id': user_id,
+            'content': data.get('content', ''),
+            'timestamp': datetime.now().isoformat(),
+            'id': int(datetime.now().timestamp() * 1000)
+        }
+        
+        result = log_collection.insert_one(log_entry)
+        log_entry['_id'] = str(result.inserted_id)
+        
+        return jsonify(log_entry), 201
+        
+    except Exception as e:
+        print(f"Error adding to log: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/log', methods=['DELETE'])
+@login_required
+def clear_log():
+    """Clear all log entries"""
+    try:
+        if db is None:
+            return jsonify({"error": "Database not connected"}), 500
+        
+        user_id = get_current_user_id()
+        result = log_collection.delete_many({'user_id': user_id})
+        
+        return jsonify({
+            "success": True,
+            "deleted_count": result.deleted_count
+        }), 200
+        
+    except Exception as e:
+        print(f"Error clearing log: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ==================== EXISTING ROUTES (Updated with auth) ====================
 
 
-@app.get("/api/status")
-async def api_status(companyId: str = ""):
-    """
-    Returns whether the app has a valid token for this company.
-    Called by the panel on load so it can show a Connect button if needed.
-    """
-    if not companyId:
-        return {"connected": False}
-    token = get_valid_token(companyId)
-    return {"connected": bool(token)}
+@app.route('/exercise', methods=['POST', 'OPTIONS'])
+@login_required
+def get_exercise():
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    try:
+        data = request.json
+        topics = data.get('topics', [])
+        exercise_type = data.get('exercise_type', 'translation')
+        dictionary_words = data.get('dictionary_words', [])
+        
+        print(f"Exercise request: {exercise_type}, topics: {topics}, dict words: {len(dictionary_words)}")
+        
+        if not topics and not dictionary_words:
+            return jsonify({"error": "No topics or dictionary words provided"}), 400
+        
+        question = generate_exercise(topics, exercise_type, dictionary_words)
+        
+        return jsonify({
+            "question": question,
+            "exercise_type": exercise_type,
+            "topics": topics,
+            "using_dictionary": len(dictionary_words) > 0,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        print(f"Error in get_exercise: {e}")
+        return jsonify({"error": str(e)}), 500
 
+@app.route('/check-answer', methods=['POST', 'OPTIONS'])
+@login_required
+def check_answer_route():
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    try:
+        data = request.json
+        question = data.get('question', '')
+        answer = data.get('answer', '')
+        exercise_type = data.get('exercise_type', 'translation')
+        
+        if not question or not answer:
+            return jsonify({"error": "Question and answer required"}), 400
+        
+        feedback = check_answer(question, answer, exercise_type)
+        
+        return jsonify({
+            "feedback": feedback,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        print(f"Error checking answer: {e}")
+        return jsonify({"error": str(e)}), 500
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+@app.route('/analyze-word', methods=['POST', 'OPTIONS'])
+@login_required
+def analyze_word_route():
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    try:
+        data = request.json
+        word = data.get('word', '')
+        context = data.get('context', '')
+        
+        if not word:
+            return jsonify({"error": "Word required"}), 400
+        
+        word_data = analyze_word(word, context)
+        
+        return jsonify(word_data)
+    except Exception as e:
+        print(f"Error analyzing word: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/health', methods=['GET'])
+def health():
+    # Fixed: Use 'is not None' instead of just 'if db'
+    db_status = "connected" if db is not None else "disconnected"
+    return jsonify({
+        "status": "healthy",
+        "api_key_configured": bool(openai.api_key),
+        "mongodb_status": db_status,
+        "exercise_history_size": len(exercise_history),
+        "timestamp": datetime.now().isoformat()
+    }), 200
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    print(f"\n{'='*50}")
+    print(f"German Learning App API - With Authentication")
+    print(f"Port: {port}")
+    print(f"OpenAI API Key: {'✓' if openai.api_key else '✗'}")
+    print(f"MongoDB: {'✓ Connected' if db else '✗ Not connected'}")
+    print(f"{'='*50}\n")
+
+    app.run(host='0.0.0.0', port=port, debug=True)
+
